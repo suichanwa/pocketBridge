@@ -10,7 +10,7 @@ import {
 import { Button } from '@/components/ui/button.js';
 import { Input } from '@/components/ui/input.js';
 import { Badge } from '@/components/ui/badge.js';
-import { Key, Lock, Send, Check, ExternalLink, Copy } from 'lucide-react';
+import { Key, Lock, Send, Check, ExternalLink, Copy, Sparkles } from 'lucide-react';
 import type { SystemStatus, ConfigSettings } from '../../shared/types.js';
 
 interface SettingsModalProps {
@@ -27,6 +27,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSaveSettings,
 }) => {
   const [geminiKey, setGeminiKey] = useState('');
+  const [modelTier, setModelTier] = useState<'flash' | 'pro'>(status?.modelTier || 'flash');
   const [accessPin, setAccessPin] = useState(localStorage.getItem('pb_pin') || '');
   const [tgId, setTgId] = useState('');
   const [tgHash, setTgHash] = useState('');
@@ -36,8 +37,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   useEffect(() => {
     if (open) {
       setIsSaved(false);
+      if (status?.modelTier) {
+        setModelTier(status.modelTier);
+      }
     }
-  }, [open]);
+  }, [open, status?.modelTier]);
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,6 +53,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
     onSaveSettings({
       geminiApiKey: geminiKey || undefined,
+      modelTier,
       accessPin: accessPin || undefined,
       telegramApiId: tgId || undefined,
       telegramApiHash: tgHash || undefined,
@@ -127,6 +132,50 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <p className="text-[11px] text-muted-foreground">
               Powers autonomous tool calling, code debugging, and web search synthesis.
             </p>
+          </div>
+
+          {/* AI Model Tier Selector */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold flex items-center justify-between text-foreground">
+              <span className="flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-primary" />
+                AI Model Tier
+              </span>
+              <Badge variant="outline" className="text-[10px] py-0 px-1.5 font-normal">
+                {modelTier === 'pro' ? 'Gemini Pro' : 'Gemini Flash'}
+              </Badge>
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setModelTier('flash')}
+                className={`p-2.5 rounded-xl border text-left text-xs transition-all ${
+                  modelTier === 'flash'
+                    ? 'border-primary bg-primary/10 text-foreground ring-1 ring-primary'
+                    : 'border-border/60 bg-secondary/40 text-muted-foreground hover:bg-secondary/60'
+                }`}
+              >
+                <span className="font-semibold block text-primary">⚡ Flash</span>
+                <span className="text-[10px] text-muted-foreground block mt-0.5 leading-snug">
+                  Ultra-fast, free tier, recommended for Mac control
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setModelTier('pro')}
+                className={`p-2.5 rounded-xl border text-left text-xs transition-all ${
+                  modelTier === 'pro'
+                    ? 'border-violet-500 bg-violet-500/10 text-foreground ring-1 ring-violet-500'
+                    : 'border-border/60 bg-secondary/40 text-muted-foreground hover:bg-secondary/60'
+                }`}
+              >
+                <span className="font-semibold block text-violet-400">🧠 Pro</span>
+                <span className="text-[10px] text-muted-foreground block mt-0.5 leading-snug">
+                  Deep reasoning (requires billing linked on Google Cloud)
+                </span>
+              </button>
+            </div>
           </div>
 
           {/* Access PIN */}

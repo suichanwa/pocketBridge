@@ -168,6 +168,7 @@ async function getLiveSystemStatus(): Promise<SystemStatus> {
     hasGeminiKey: agent.hasKey(),
     hasTelegramConfig: Boolean(process.env.TELEGRAM_API_ID && process.env.TELEGRAM_API_HASH),
     pinRequired: Boolean(process.env.ACCESS_PIN && process.env.ACCESS_PIN.trim().length > 0),
+    modelTier: agent.getModelTier(),
   };
 }
 
@@ -265,6 +266,10 @@ async function startServer() {
       process.env.GEMINI_API_KEY = body.geminiApiKey;
       agent.updateApiKey(body.geminiApiKey);
     }
+    if (body.modelTier !== undefined) {
+      process.env.MODEL_TIER = body.modelTier;
+      agent.setModelTier(body.modelTier);
+    }
     if (body.accessPin !== undefined) {
       process.env.ACCESS_PIN = body.accessPin;
     }
@@ -281,6 +286,7 @@ async function startServer() {
 PORT=${PORT}
 HOST=${HOST}
 GEMINI_API_KEY=${process.env.GEMINI_API_KEY || ''}
+MODEL_TIER=${process.env.MODEL_TIER || 'flash'}
 ACCESS_PIN=${process.env.ACCESS_PIN || ''}
 TELEGRAM_API_ID=${process.env.TELEGRAM_API_ID || ''}
 TELEGRAM_API_HASH=${process.env.TELEGRAM_API_HASH || ''}

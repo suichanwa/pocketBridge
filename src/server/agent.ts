@@ -90,13 +90,23 @@ const agentToolDeclarations = [
 
 export class PocketAgent {
   private apiKey: string;
+  private modelTier: 'flash' | 'pro';
 
-  constructor(apiKey?: string) {
+  constructor(apiKey?: string, modelTier: 'flash' | 'pro' = 'flash') {
     this.apiKey = apiKey || process.env.GEMINI_API_KEY || '';
+    this.modelTier = (process.env.MODEL_TIER as any) === 'pro' ? 'pro' : modelTier;
   }
 
   public updateApiKey(key: string) {
     this.apiKey = key;
+  }
+
+  public setModelTier(tier: 'flash' | 'pro') {
+    this.modelTier = tier;
+  }
+
+  public getModelTier(): 'flash' | 'pro' {
+    return this.modelTier;
   }
 
   public hasKey(): boolean {
@@ -258,7 +268,10 @@ Guidelines:
 4. Execute tests and check exit codes carefully.
 `;
 
-      const candidateModels = ['gemini-flash-latest', 'gemini-3.7-flash', 'gemini-3.8-flash'];
+      const candidateModels =
+        this.modelTier === 'pro'
+          ? ['gemini-pro-latest', 'gemini-3.1-pro-preview', 'gemini-flash-latest', 'gemini-3.7-flash']
+          : ['gemini-flash-latest', 'gemini-3.7-flash', 'gemini-3.8-flash'];
 
       const generateWithFallback = async (contents: any[]) => {
         let lastErr: any = null;

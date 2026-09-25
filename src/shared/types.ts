@@ -48,10 +48,12 @@ export interface SystemStatus {
   hasGeminiKey: boolean;
   hasTelegramConfig: boolean;
   pinRequired: boolean;
+  modelTier: 'flash' | 'pro';
 }
 
 export interface ConfigSettings {
   geminiApiKey?: string;
+  modelTier?: 'flash' | 'pro';
   accessPin?: string;
   telegramApiId?: string;
   telegramApiHash?: string;
