@@ -270,8 +270,22 @@ Guidelines:
 
       const candidateModels =
         this.modelTier === 'pro'
-          ? ['gemini-pro-latest', 'gemini-3.1-pro-preview', 'gemini-flash-latest', 'gemini-3.7-flash']
-          : ['gemini-flash-latest', 'gemini-3.7-flash', 'gemini-3.8-flash'];
+          ? [
+              'gemini-3.6-flash',
+              'gemini-flash-lite-latest',
+              'gemini-3.1-flash-lite',
+              'gemini-pro-latest',
+              'gemini-3.1-pro-preview',
+            ]
+          : [
+              'gemini-3.6-flash',
+              'gemini-flash-lite-latest',
+              'gemini-3.1-flash-lite',
+              'gemini-3.5-flash-lite',
+              'gemini-3-flash-preview',
+              'gemini-flash-latest',
+              'gemini-3.7-flash',
+            ];
 
       const generateWithFallback = async (contents: any[]) => {
         let lastErr: any = null;
@@ -288,7 +302,8 @@ Guidelines:
           } catch (err: any) {
             lastErr = err;
             if (err?.status === 503 || err?.status === 429 || err?.status === 404) {
-              console.warn(`Model ${m} returned ${err.status}, trying fallback model...`);
+              console.warn(`Model ${m} returned ${err.status}, waiting and trying fallback model...`);
+              await new Promise((resolve) => setTimeout(resolve, 600));
               continue;
             }
             throw err;
@@ -456,7 +471,12 @@ Guidelines:
       return finalFallback;
     } catch (err: any) {
       console.error('Gemini Agent Error:', err);
-      const errMessage = `⚠️ Error during agent execution: ${err?.message || 'Unknown error'}`;
+      let errMessage = `⚠️ Error during agent execution: ${err?.message || 'Unknown error'}`;
+      if (err?.status === 503 || err?.message?.includes('503') || err?.message?.includes('high demand')) {
+        errMessage = `⚠️ **Google AI temporary capacity spike (503)**:\nThe AI model is temporarily experiencing high global demand. Please try sending your request again in a few moments, or use direct commands:\n- \`/screenshot\` — Grab live desktop screenshot\n- \`/camera\` — Snap webcam photo\n- \`/git <command>\` — Run git command\n- \`/sh <command>\` — Run terminal command\n- \`/system\` — View battery & memory info`;
+      } else if (err?.status === 429 || err?.message?.includes('429') || err?.message?.includes('quota')) {
+        errMessage = `⚠️ **Google AI Quota Limit (429)**:\nYour API key reached its rate limit or quota. If using Pro models, ensure your key is linked to a billing account or switch Model Tier to 'Flash' in Settings.\n\n*Direct slash commands remain operational:* \`/screenshot\`, \`/camera\`, \`/sh\`, \`/git\`.`;
+      }
       callbacks.onUpdateMessage(assistantMessageId, {
         status: 'error',
         content: errMessage,
