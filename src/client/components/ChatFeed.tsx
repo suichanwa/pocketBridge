@@ -139,6 +139,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
+  const commandItemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -163,6 +164,16 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
       setShowCommands(false);
     }
   }, [inputText, matchingCommands.length]);
+
+  // Auto-scroll the dropdown list to follow keyboard/hover selection
+  useEffect(() => {
+    if (showCommands && commandItemRefs.current[selectedCmdIndex]) {
+      commandItemRefs.current[selectedCmdIndex]?.scrollIntoView({
+        block: 'nearest',
+        behavior: 'smooth',
+      });
+    }
+  }, [selectedCmdIndex, showCommands]);
 
   const handleSelectCommand = (cmdName: string) => {
     if (cmdName.trim() === '/clear') {
@@ -578,6 +589,9 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
             return (
               <button
                 key={cmd.name}
+                ref={(el) => {
+                  commandItemRefs.current[idx] = el;
+                }}
                 type="button"
                 onClick={() => handleSelectCommand(cmd.name)}
                 onMouseEnter={() => setSelectedCmdIndex(idx)}
