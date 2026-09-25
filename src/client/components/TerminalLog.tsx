@@ -2,15 +2,24 @@ import React, { useRef, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card.js';
 import { Button } from '@/components/ui/button.js';
 import { Badge } from '@/components/ui/badge.js';
-import { Terminal, Copy, Check, Trash2, ArrowDown } from 'lucide-react';
+import { Terminal, Copy, Check, Trash2, ArrowDown, Minus, Maximize2, Minimize2 } from 'lucide-react';
 import type { TerminalLog as TerminalLogType } from '../../shared/types.js';
 
 interface TerminalLogProps {
   logs: TerminalLogType[];
   onClear?: () => void;
+  onHide?: () => void;
+  onToggleMaximize?: () => void;
+  isMaximized?: boolean;
 }
 
-export const TerminalLog: React.FC<TerminalLogProps> = ({ logs, onClear }) => {
+export const TerminalLog: React.FC<TerminalLogProps> = ({
+  logs,
+  onClear,
+  onHide,
+  onToggleMaximize,
+  isMaximized,
+}) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
 
@@ -39,17 +48,41 @@ export const TerminalLog: React.FC<TerminalLogProps> = ({ logs, onClear }) => {
             </Badge>
           )}
         </div>
-        {logs.length > 0 && onClear && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onClear}
-            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            title="Clear logs"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </Button>
-        )}
+        <div className="flex items-center gap-1.5">
+          {logs.length > 0 && onClear && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onClear}
+              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              title="Clear logs"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </Button>
+          )}
+          {onToggleMaximize && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onToggleMaximize}
+              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              title={isMaximized ? "Restore panel size" : "Maximize panel"}
+            >
+              {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+            </Button>
+          )}
+          {onHide && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onHide}
+              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              title="Hide panel"
+            >
+              <Minus className="w-3.5 h-3.5" />
+            </Button>
+          )}
+        </div>
       </CardHeader>
 
       <CardContent

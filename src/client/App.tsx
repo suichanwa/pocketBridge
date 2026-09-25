@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useAgentSocket } from '@/hooks/useAgentSocket.js';
 import { Header } from '@/components/Header.js';
 import { ChatFeed } from '@/components/ChatFeed.js';
@@ -6,7 +6,17 @@ import { ScreenViewer } from '@/components/ScreenViewer.js';
 import { TerminalLog } from '@/components/TerminalLog.js';
 import { SettingsModal } from '@/components/SettingsModal.js';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs.js';
-import { MessageSquare, Camera, Terminal, ShieldAlert } from 'lucide-react';
+import {
+  MessageSquare,
+  Camera,
+  Terminal,
+  ShieldAlert,
+  GripVertical,
+  GripHorizontal,
+  Maximize2,
+  Minimize2,
+  Minus,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button.js';
 import { Input } from '@/components/ui/input.js';
 
@@ -31,6 +41,63 @@ export function App() {
   const [pinInput, setPinInput] = useState('');
   const [isCapturing, setIsCapturing] = useState(false);
 
+  // Panel Visibility (persisted)
+  const [panels, setPanels] = useState<{ chat: boolean; screen: boolean; terminal: boolean }>(() => {
+    try {
+      const saved = localStorage.getItem('pocketbridge_panels');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return { chat: true, screen: true, terminal: true };
+  });
+
+  // Panel Width/Height splits (persisted)
+  const [splitPercent, setSplitPercent] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('pocketbridge_split_h');
+      if (saved) return Number(saved);
+    } catch {}
+    return 52;
+  });
+
+  const [verticalSplitPercent, setVerticalSplitPercent] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('pocketbridge_split_v');
+      if (saved) return Number(saved);
+    } catch {}
+    return 50;
+  });
+
+  const [maximizedPanel, setMaximizedPanel] = useState<'chat' | 'screen' | 'terminal' | null>(null);
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const sideColRef = useRef<HTMLDivElement>(null);
+  const isDraggingH = useRef(false);
+  const isDraggingV = useRef(false);
+
+  // Sync to localStorage
+  useEffect(() => {
+    localStorage.setItem('pocketbridge_panels', JSON.stringify(panels));
+  }, [panels]);
+
+  useEffect(() => {
+    localStorage.setItem('pocketbridge_split_h', splitPercent.toString());
+  }, [splitPercent]);
+
+  useEffect(() => {
+    localStorage.setItem('pocketbridge_split_v', verticalSplitPercent.toString());
+  }, [verticalSplitPercent]);
+
+  const togglePanel = (panel: 'chat' | 'screen' | 'terminal') => {
+    setPanels((prev) => ({ ...prev, [panel]: !prev[panel] }));
+    if (maximizedPanel === panel) {
+      setMaximizedPanel(null);
+    }
+  };
+
+  const toggleMaximize = (panel: 'chat' | 'screen' | 'terminal') => {
+    setMaximizedPanel((prev) => (prev === panel ? null : panel));
+  };
+
   const handleTakeScreenshot = async () => {
     setIsCapturing(true);
     sendQuickAction('screenshot');
@@ -42,6 +109,68 @@ export function App() {
     if (pinInput.trim()) {
       verifyPin(pinInput.trim());
     }
+  };
+
+  // Horizontal splitter dragging
+  const startDraggingH = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    isDraggingH.current = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMove = (moveEvent: MouseEvent | TouchEvent) => {
+      if (!isDraggingH.current || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const clientX = 'touches' in moveEvent ? moveEvent.touches[0].clientX : moveEvent.clientX;
+      const newPercent = ((clientX - rect.left) / rect.width) * 100;
+      setSplitPercent(Math.min(80, Math.max(20, newPercent)));
+    };
+
+    const onUp = () => {
+      isDraggingH.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('touchmove', onMove);
+    window.addEventListener('touchend', onUp);
+  };
+
+  // Vertical splitter dragging
+  const startDraggingV = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    isDraggingV.current = true;
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMove = (moveEvent: MouseEvent | TouchEvent) => {
+      if (!isDraggingV.current || !sideColRef.current) return;
+      const rect = sideColRef.current.getBoundingClientRect();
+      const clientY = 'touches' in moveEvent ? moveEvent.touches[0].clientY : moveEvent.clientY;
+      const newPercent = ((clientY - rect.top) / rect.height) * 100;
+      setVerticalSplitPercent(Math.min(80, Math.max(20, newPercent)));
+    };
+
+    const onUp = () => {
+      isDraggingV.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('touchmove', onMove);
+    window.addEventListener('touchend', onUp);
   };
 
   // PIN Authentication Gate
@@ -77,6 +206,13 @@ export function App() {
     );
   }
 
+  const isChatVisible = maximizedPanel ? maximizedPanel === 'chat' : panels.chat;
+  const isScreenVisible = maximizedPanel ? maximizedPanel === 'screen' : panels.screen;
+  const isTerminalVisible = maximizedPanel ? maximizedPanel === 'terminal' : panels.terminal;
+  const isSideVisible = isScreenVisible || isTerminalVisible;
+  const hasBothColumns = isChatVisible && isSideVisible;
+  const noPanelsVisible = !isChatVisible && !isScreenVisible && !isTerminalVisible;
+
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-background text-foreground">
       {/* Top Header */}
@@ -85,6 +221,8 @@ export function App() {
         isConnected={isConnected}
         onOpenSettings={() => setSettingsOpen(true)}
         onClearChat={clearChat}
+        panels={panels}
+        onTogglePanel={togglePanel}
       />
 
       {/* Mobile Layout (< 1024px) */}
@@ -142,34 +280,163 @@ export function App() {
         </Tabs>
       </div>
 
-      {/* Desktop / 16:10 Laptop / 2K 27" Layout (>= 1024px) */}
-      <div className="hidden lg:grid grid-cols-12 flex-1 overflow-hidden max-w-[1920px] mx-auto w-full p-3 sm:p-4 gap-4">
+      {/* Desktop / Resizable & Hideable Layout (>= 1024px) */}
+      <div
+        ref={containerRef}
+        className="hidden lg:flex flex-1 overflow-hidden max-w-[1920px] mx-auto w-full p-3 sm:p-4 gap-0 relative"
+      >
+        {/* All panels hidden fallback */}
+        {noPanelsVisible && (
+          <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-3">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => togglePanel('chat')}
+                className="h-10 w-10 border-border/70 text-primary"
+                title="Restore Chat"
+              >
+                <MessageSquare className="w-5 h-5" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => togglePanel('screen')}
+                className="h-10 w-10 border-border/70 text-sky-400"
+                title="Restore Screen"
+              >
+                <Camera className="w-5 h-5" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => togglePanel('terminal')}
+                className="h-10 w-10 border-border/70 text-emerald-400"
+                title="Restore Terminal"
+              >
+                <Terminal className="w-5 h-5" />
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Left Column: Chat Conversation */}
-        <div className="col-span-6 xl:col-span-7 flex flex-col h-full rounded-xl border border-border/80 bg-card/40 backdrop-blur-sm overflow-hidden shadow-sm">
-          <ChatFeed
-            messages={messages}
-            onSendMessage={sendMessage}
-            onClearChat={clearChat}
-            disabled={!isConnected}
-          />
-        </div>
+        {isChatVisible && (
+          <div
+            style={{ width: hasBothColumns ? `${splitPercent}%` : '100%' }}
+            className="flex flex-col h-full rounded-xl border border-border/80 bg-card/40 backdrop-blur-sm overflow-hidden shadow-sm transition-all duration-75"
+          >
+            {/* Chat Panel Header */}
+            <div className="flex items-center justify-between py-1.5 px-3 border-b border-border/40 bg-card/60">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-3.5 h-3.5 text-primary" />
+                <span className="text-xs font-semibold">Chat</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => toggleMaximize('chat')}
+                  className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                  title={maximizedPanel === 'chat' ? 'Restore size' : 'Maximize panel'}
+                >
+                  {maximizedPanel === 'chat' ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => togglePanel('chat')}
+                  className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                  title="Hide panel"
+                >
+                  <Minus className="w-3 h-3" />
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-hidden">
+              <ChatFeed
+                messages={messages}
+                onSendMessage={sendMessage}
+                onClearChat={clearChat}
+                disabled={!isConnected}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Horizontal Resizer Divider between Chat & Side Column */}
+        {hasBothColumns && (
+          <div
+            onMouseDown={startDraggingH}
+            onTouchStart={startDraggingH}
+            className="w-3 hover:w-3 z-10 cursor-col-resize flex items-center justify-center group select-none shrink-0"
+            title="Drag to resize columns"
+          >
+            <div className="w-1 h-12 rounded-full bg-border/60 group-hover:bg-primary transition-colors flex items-center justify-center">
+              <GripVertical className="w-2.5 h-2.5 text-muted-foreground group-hover:text-primary-foreground opacity-0 group-hover:opacity-100" />
+            </div>
+          </div>
+        )}
 
         {/* Right Column: Split Screen Viewer & Terminal */}
-        <div className="col-span-6 xl:col-span-5 flex flex-col h-full space-y-4 overflow-hidden">
-          {/* Top Half: Screen Viewer */}
-          <div className="flex-1 min-h-[300px] overflow-hidden">
-            <ScreenViewer
-              latestUrl={latestScreenshot}
-              onTakeScreenshot={handleTakeScreenshot}
-              isLoading={isCapturing}
-            />
-          </div>
+        {isSideVisible && (
+          <div
+            ref={sideColRef}
+            style={{ width: hasBothColumns ? `${100 - splitPercent}%` : '100%' }}
+            className="flex flex-col h-full overflow-hidden transition-all duration-75 gap-0"
+          >
+            {/* Top Half: Screen Viewer */}
+            {isScreenVisible && (
+              <div
+                style={{
+                  height: isScreenVisible && isTerminalVisible ? `${verticalSplitPercent}%` : '100%',
+                }}
+                className="overflow-hidden min-h-[160px] pb-1 flex flex-col"
+              >
+                <ScreenViewer
+                  latestUrl={latestScreenshot}
+                  onTakeScreenshot={handleTakeScreenshot}
+                  isLoading={isCapturing}
+                  onHide={() => togglePanel('screen')}
+                  onToggleMaximize={() => toggleMaximize('screen')}
+                  isMaximized={maximizedPanel === 'screen'}
+                />
+              </div>
+            )}
 
-          {/* Bottom Half: Terminal Output */}
-          <div className="flex-1 min-h-[260px] overflow-hidden">
-            <TerminalLog logs={terminalLogs} />
+            {/* Vertical Resizer Divider between Screen & Terminal */}
+            {isScreenVisible && isTerminalVisible && (
+              <div
+                onMouseDown={startDraggingV}
+                onTouchStart={startDraggingV}
+                className="h-3 hover:h-3 z-10 cursor-row-resize flex items-center justify-center group select-none shrink-0"
+                title="Drag to resize panels"
+              >
+                <div className="h-1 w-12 rounded-full bg-border/60 group-hover:bg-primary transition-colors flex items-center justify-center">
+                  <GripHorizontal className="w-2.5 h-2.5 text-muted-foreground group-hover:text-primary-foreground opacity-0 group-hover:opacity-100" />
+                </div>
+              </div>
+            )}
+
+            {/* Bottom Half: Terminal Output */}
+            {isTerminalVisible && (
+              <div
+                style={{
+                  height: isScreenVisible && isTerminalVisible ? `${100 - verticalSplitPercent}%` : '100%',
+                }}
+                className="overflow-hidden min-h-[140px] pt-1 flex flex-col"
+              >
+                <TerminalLog
+                  logs={terminalLogs}
+                  onHide={() => togglePanel('terminal')}
+                  onToggleMaximize={() => toggleMaximize('terminal')}
+                  isMaximized={maximizedPanel === 'terminal'}
+                />
+              </div>
+            )}
           </div>
-        </div>
+        )}
       </div>
 
       {/* Settings Modal */}
@@ -182,4 +449,5 @@ export function App() {
     </div>
   );
 }
+
 export default App;

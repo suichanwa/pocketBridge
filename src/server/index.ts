@@ -230,6 +230,34 @@ async function startServer() {
     }
   });
 
+  app.delete('/api/captures/:filename', async (req, reply) => {
+    try {
+      const { filename } = req.params as { filename: string };
+      const safeFilename = path.basename(filename);
+      const filePath = path.join(CAPTURES_DIR, safeFilename);
+      await fs.unlink(filePath).catch(() => {});
+      return { success: true, filename: safeFilename };
+    } catch (err: any) {
+      reply.status(500);
+      return { success: false, error: err?.message };
+    }
+  });
+
+  app.delete('/api/captures', async (req, reply) => {
+    try {
+      const files = await fs.readdir(CAPTURES_DIR);
+      for (const f of files) {
+        if (f.endsWith('.png') || f.endsWith('.jpg')) {
+          await fs.unlink(path.join(CAPTURES_DIR, f)).catch(() => {});
+        }
+      }
+      return { success: true };
+    } catch (err: any) {
+      reply.status(500);
+      return { success: false, error: err?.message };
+    }
+  });
+
   app.post('/api/action/screenshot', async (req, reply) => {
     try {
       const shot = await takeMacScreenshot();

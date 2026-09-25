@@ -10,6 +10,9 @@ import {
   WifiOff,
   Cpu,
   Trash2,
+  MessageSquare,
+  Camera,
+  Terminal,
 } from 'lucide-react';
 import type { SystemStatus } from '../../shared/types.js';
 
@@ -18,6 +21,12 @@ interface HeaderProps {
   isConnected: boolean;
   onOpenSettings: () => void;
   onClearChat?: () => void;
+  panels?: {
+    chat: boolean;
+    screen: boolean;
+    terminal: boolean;
+  };
+  onTogglePanel?: (panel: 'chat' | 'screen' | 'terminal') => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -25,6 +34,8 @@ export const Header: React.FC<HeaderProps> = ({
   isConnected,
   onOpenSettings,
   onClearChat,
+  panels,
+  onTogglePanel,
 }) => {
   return (
     <header className="sticky top-0 z-30 w-full border-b border-border/80 bg-background/90 backdrop-blur-md px-3 sm:px-6 py-2.5 sm:py-3">
@@ -80,6 +91,39 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="hidden md:flex items-center gap-1.5 bg-secondary/50 border border-border/50 rounded-lg px-2.5 py-1 text-xs text-muted-foreground">
               <Cpu className="w-3.5 h-3.5 text-primary" />
               <span>RAM: <strong className="text-foreground">{status.memory.usedPercent}%</strong></span>
+            </div>
+          )}
+
+          {/* Panel Visibility Toggles (Desktop/Wide) */}
+          {panels && onTogglePanel && (
+            <div className="hidden lg:flex items-center gap-1 bg-secondary/40 border border-border/50 rounded-lg p-0.5">
+              <Button
+                variant={panels.chat ? "secondary" : "ghost"}
+                size="icon"
+                onClick={() => onTogglePanel('chat')}
+                className={`h-7 w-7 ${panels.chat ? 'text-primary' : 'text-muted-foreground/50 hover:text-muted-foreground'}`}
+                title="Toggle Chat Panel"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+              </Button>
+              <Button
+                variant={panels.screen ? "secondary" : "ghost"}
+                size="icon"
+                onClick={() => onTogglePanel('screen')}
+                className={`h-7 w-7 ${panels.screen ? 'text-sky-400' : 'text-muted-foreground/50 hover:text-muted-foreground'}`}
+                title="Toggle Screen Panel"
+              >
+                <Camera className="w-3.5 h-3.5" />
+              </Button>
+              <Button
+                variant={panels.terminal ? "secondary" : "ghost"}
+                size="icon"
+                onClick={() => onTogglePanel('terminal')}
+                className={`h-7 w-7 ${panels.terminal ? 'text-emerald-400' : 'text-muted-foreground/50 hover:text-muted-foreground'}`}
+                title="Toggle Terminal Panel"
+              >
+                <Terminal className="w-3.5 h-3.5" />
+              </Button>
             </div>
           )}
 

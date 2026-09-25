@@ -14,7 +14,10 @@
     "start": "./scripts/start-server.sh",
     "tunnel": "tsx scripts/tunnel.ts",
     "test:responsive": "tsx test/test-responsive.ts",
-    "telegram:login": "tsx scripts/telegram-login.ts"
+    "telegram:login": "tsx scripts/telegram-login.ts",
+    "service:install": "./scripts/service-install.sh",
+    "service:uninstall": "./scripts/service-uninstall.sh",
+    "service:status": "launchctl list | grep -i pocketbridge || echo 'PocketBridge service not loaded'"
   },
   "bugs": {
     "url": "https://github.com/suichanwa/pocketBridge/issues"
