@@ -346,15 +346,31 @@ TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
           }
         }
 
-        if (clientMsg.type === 'chat_send') {
-          const userText = clientMsg.text.trim();
+        if (clientMsg.type === 'chat_clear') {
+          messages.length = 0;
+          broadcast({ type: 'chat_cleared' });
+          return;
+        }
 
-          // Fast direct /clear command
-          if (userText === '/clear') {
+        if (clientMsg.type === 'chat_send') {
+          const rawText = String(clientMsg.text || '').trim();
+          const lower = rawText.toLowerCase();
+
+          // Fast direct /clear command (handles /clear, clear, /cls, /clean, /reset, /clear all)
+          if (
+            lower === '/clear' ||
+            lower === 'clear' ||
+            lower === '/cls' ||
+            lower === '/clean' ||
+            lower === '/reset' ||
+            lower.startsWith('/clear ')
+          ) {
             messages.length = 0;
             broadcast({ type: 'chat_cleared' });
             return;
           }
+
+          const userText = rawText;
 
           const userMsgId = `user-${Date.now()}`;
           const assistantMsgId = `asst-${Date.now() + 1}`;

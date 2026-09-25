@@ -448,7 +448,7 @@ export class PocketAgent {
       return res.output;
     }
 
-    if (trimmed === '/clear') {
+    if (trimmed.toLowerCase() === '/clear' || trimmed.toLowerCase() === 'clear') {
       callbacks.onUpdateMessage(assistantMessageId, {
         status: 'done',
         content: '🧹 Chat cleared.',

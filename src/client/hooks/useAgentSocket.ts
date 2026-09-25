@@ -158,7 +158,33 @@ export function useAgentSocket() {
     };
   }, [connect]);
 
+  const clearChat = useCallback(() => {
+    setMessages([]);
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(
+        JSON.stringify({
+          type: 'chat_clear',
+          pin: savedPinRef.current,
+        } as ClientMessage)
+      );
+    }
+  }, []);
+
   const sendMessage = useCallback((text: string) => {
+    const trimmed = text.trim();
+    const lower = trimmed.toLowerCase();
+    if (
+      lower === '/clear' ||
+      lower === 'clear' ||
+      lower === '/cls' ||
+      lower === '/clean' ||
+      lower === '/reset' ||
+      lower.startsWith('/clear ')
+    ) {
+      clearChat();
+      return;
+    }
+
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(
         JSON.stringify({
@@ -168,7 +194,7 @@ export function useAgentSocket() {
         } as ClientMessage)
       );
     }
-  }, []);
+  }, [clearChat]);
 
   const sendQuickAction = useCallback((action: 'screenshot' | 'camera' | 'git_status' | 'system_info' | 'kill_apps') => {
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
@@ -216,6 +242,7 @@ export function useAgentSocket() {
     isAuthenticated,
     authError,
     sendMessage,
+    clearChat,
     sendQuickAction,
     saveSettings,
     verifyPin,

@@ -62,6 +62,7 @@ export interface ConfigSettings {
 
 export type ClientMessage =
   | { type: 'chat_send'; text: string; pin?: string }
+  | { type: 'chat_clear'; pin?: string }
   | { type: 'run_quick_action'; action: 'screenshot' | 'camera' | 'git_status' | 'system_info' | 'kill_apps'; pin?: string }
   | { type: 'save_settings'; settings: ConfigSettings; pin?: string }
   | { type: 'verify_pin'; pin: string }

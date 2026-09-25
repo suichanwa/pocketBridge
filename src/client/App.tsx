@@ -20,6 +20,7 @@ export function App() {
     isAuthenticated,
     authError,
     sendMessage,
+    clearChat,
     sendQuickAction,
     saveSettings,
     verifyPin,
@@ -83,6 +84,7 @@ export function App() {
         status={status}
         isConnected={isConnected}
         onOpenSettings={() => setSettingsOpen(true)}
+        onClearChat={clearChat}
       />
 
       {/* Mobile Layout (< 1024px) */}
@@ -121,6 +123,7 @@ export function App() {
             <ChatFeed
               messages={messages}
               onSendMessage={sendMessage}
+              onClearChat={clearChat}
               disabled={!isConnected}
             />
           </TabsContent>
@@ -146,6 +149,7 @@ export function App() {
           <ChatFeed
             messages={messages}
             onSendMessage={sendMessage}
+            onClearChat={clearChat}
             disabled={!isConnected}
           />
         </div>

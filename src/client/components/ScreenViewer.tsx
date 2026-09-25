@@ -54,13 +54,13 @@ export const ScreenViewer: React.FC<ScreenViewerProps> = ({
           <div className="flex items-center gap-1.5">
             <Button
               variant="outline"
-              size="sm"
+              size="icon"
               onClick={onTakeScreenshot}
               disabled={isLoading}
-              className="h-7 text-xs px-2.5 gap-1.5 border-border/70"
+              className="h-7 w-7 border-border/70 text-muted-foreground hover:text-foreground"
+              title="Capture Mac Screen Now"
             >
-              <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
-              <span>Capture Now</span>
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
             </Button>
             {activeImage && (
               <Button

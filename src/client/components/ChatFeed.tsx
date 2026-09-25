@@ -118,12 +118,14 @@ const AVAILABLE_COMMANDS: CommandOption[] = [
 interface ChatFeedProps {
   messages: ChatMessage[];
   onSendMessage: (text: string) => void;
+  onClearChat?: () => void;
   disabled?: boolean;
 }
 
 export const ChatFeed: React.FC<ChatFeedProps> = ({
   messages,
   onSendMessage,
+  onClearChat,
   disabled,
 }) => {
   const [inputText, setInputText] = useState('');
@@ -163,6 +165,13 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
   }, [inputText, matchingCommands.length]);
 
   const handleSelectCommand = (cmdName: string) => {
+    if (cmdName.trim() === '/clear') {
+      onClearChat?.();
+      onSendMessage('/clear');
+      setInputText('');
+      setShowCommands(false);
+      return;
+    }
     setInputText(cmdName);
     setShowCommands(false);
     inputRef.current?.focus();
@@ -187,8 +196,24 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputText.trim() || disabled) return;
-    onSendMessage(inputText.trim());
+    const text = inputText.trim();
+    if (!text || disabled) return;
+    const lower = text.toLowerCase();
+    if (
+      lower === '/clear' ||
+      lower === 'clear' ||
+      lower === '/cls' ||
+      lower === '/clean' ||
+      lower === '/reset' ||
+      lower.startsWith('/clear ')
+    ) {
+      onClearChat?.();
+      onSendMessage('/clear');
+      setInputText('');
+      setShowCommands(false);
+      return;
+    }
+    onSendMessage(text);
     setInputText('');
     setShowCommands(false);
   };
@@ -490,10 +515,10 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                             <button
                               type="button"
                               onClick={() => setPreviewImageUrl(url)}
-                              className="absolute bottom-2 right-2 bg-black/80 hover:bg-black text-white text-xs px-2.5 py-1 rounded-md flex items-center gap-1.5 shadow-md border border-white/10"
+                              title="View Full"
+                              className="absolute bottom-2 right-2 bg-black/80 hover:bg-black text-white h-7 w-7 rounded-md flex items-center justify-center shadow-md border border-white/10 transition-colors"
                             >
                               <Maximize2 className="w-3.5 h-3.5 text-sky-400" />
-                              <span>View Full</span>
                             </button>
                           </div>
                         ))}
@@ -519,23 +544,17 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                     <button
                       type="button"
                       onClick={() => handleToggleSpeak(msg.id, msg.content)}
-                      title={speakingMsgId === msg.id ? 'Stop listening' : 'Read aloud on this device'}
-                      className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full transition-colors ${
+                      title={speakingMsgId === msg.id ? 'Stop listening' : 'Read aloud'}
+                      className={`h-6 w-6 rounded-full flex items-center justify-center transition-colors ${
                         speakingMsgId === msg.id
-                          ? 'bg-primary text-primary-foreground font-medium animate-pulse'
+                          ? 'bg-primary text-primary-foreground animate-pulse shadow-sm'
                           : 'text-muted-foreground hover:text-foreground hover:bg-secondary/80'
                       }`}
                     >
                       {speakingMsgId === msg.id ? (
-                        <>
-                          <VolumeX className="w-3 h-3" />
-                          <span>Stop</span>
-                        </>
+                        <VolumeX className="w-3.5 h-3.5" />
                       ) : (
-                        <>
-                          <Volume2 className="w-3 h-3 text-primary" />
-                          <span>Read Aloud</span>
-                        </>
+                        <Volume2 className="w-3.5 h-3.5" />
                       )}
                     </button>
                   )}
@@ -607,13 +626,26 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
               isListening ? 'ring-2 ring-rose-500 bg-rose-500/10 placeholder:text-rose-400' : ''
             }`}
           />
+          {onClearChat && (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={onClearChat}
+              disabled={disabled}
+              title="Clear Chat (/clear)"
+              className="h-10 w-10 shrink-0 rounded-xl bg-secondary/70 hover:bg-destructive/15 hover:text-destructive hover:border-destructive/40 text-muted-foreground border-border/60 transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+            </Button>
+          )}
           <Button
             type="button"
             variant="outline"
             size="icon"
             onClick={toggleListening}
             disabled={disabled}
-            title={isListening ? 'Stop listening' : 'Voice Input (Speech-to-Text)'}
+            title={isListening ? 'Stop listening' : 'Voice Input'}
             className={`h-10 w-10 shrink-0 rounded-xl transition-all ${
               isListening
                 ? 'bg-rose-500 hover:bg-rose-600 text-white animate-pulse ring-2 ring-rose-400/50 shadow-md border-transparent'
@@ -626,6 +658,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
             type="submit"
             size="icon"
             disabled={!inputText.trim() || disabled}
+            title="Send"
             className="h-10 w-10 shrink-0 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
           >
             <Send className="w-4 h-4" />
@@ -652,10 +685,10 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                   download="pocketbridge-capture.png"
                   target="_blank"
                   rel="noreferrer"
-                  className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 bg-secondary/80 hover:bg-secondary px-3 py-1.5 rounded-lg border border-border/40"
+                  title="Download Image"
+                  className="text-muted-foreground hover:text-foreground flex items-center justify-center bg-secondary/80 hover:bg-secondary h-8 w-8 rounded-lg border border-border/40 transition-colors"
                 >
-                  <Download className="w-3.5 h-3.5 text-sky-400" />
-                  <span>Download Full Res</span>
+                  <Download className="w-4 h-4 text-sky-400" />
                 </a>
               </div>
             </div>

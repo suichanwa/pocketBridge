@@ -9,6 +9,7 @@ import {
   Wifi,
   WifiOff,
   Cpu,
+  Trash2,
 } from 'lucide-react';
 import type { SystemStatus } from '../../shared/types.js';
 
@@ -16,12 +17,14 @@ interface HeaderProps {
   status: SystemStatus | null;
   isConnected: boolean;
   onOpenSettings: () => void;
+  onClearChat?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   status,
   isConnected,
   onOpenSettings,
+  onClearChat,
 }) => {
   return (
     <header className="sticky top-0 z-30 w-full border-b border-border/80 bg-background/90 backdrop-blur-md px-3 sm:px-6 py-2.5 sm:py-3">
@@ -78,6 +81,19 @@ export const Header: React.FC<HeaderProps> = ({
               <Cpu className="w-3.5 h-3.5 text-primary" />
               <span>RAM: <strong className="text-foreground">{status.memory.usedPercent}%</strong></span>
             </div>
+          )}
+
+          {/* Clear Chat Icon */}
+          {onClearChat && (
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={onClearChat}
+              className="h-8 w-8 sm:h-9 sm:w-9 border-border/70 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/40 text-muted-foreground"
+              title="Clear Chat (/clear)"
+            >
+              <Trash2 className="w-4 h-4" />
+            </Button>
           )}
 
           {/* Settings Trigger */}
