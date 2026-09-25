@@ -4,6 +4,16 @@ import { takeCameraPhoto } from './tools/camera.js';
 import { executeShellCommand } from './tools/shell.js';
 import { searchWeb } from './tools/search.js';
 import { sendTelegramMessage } from './tools/telegram.js';
+import {
+  mouseClick,
+  mouseMove,
+  mouseDrag,
+  typeText,
+  pressKey,
+  hotkey,
+  openApp,
+  getDisplayDimensions,
+} from './tools/cursor.js';
 import type { ChatMessage, ToolCallRecord, TerminalLog } from '../shared/types.js';
 
 export interface AgentCallbacks {
@@ -34,6 +44,90 @@ const agentToolDeclarations = [
     parameters: {
       type: Type.OBJECT,
       properties: {},
+    },
+  },
+  {
+    name: 'mouse_click',
+    description: 'Clicks the mouse at specific screen coordinates (x, y). The main MacBook display resolution is 1440 x 900 points.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        x: { type: Type.NUMBER, description: 'Horizontal coordinate in points (0 to 1440)' },
+        y: { type: Type.NUMBER, description: 'Vertical coordinate in points (0 to 900)' },
+        button: { type: Type.STRING, enum: ['left', 'right'], description: 'Mouse button to click (default left)' },
+        doubleClick: { type: Type.BOOLEAN, description: 'Set true to double-click' },
+      },
+      required: ['x', 'y'],
+    },
+  },
+  {
+    name: 'mouse_move',
+    description: 'Moves the mouse cursor to specific coordinates (x, y) without clicking.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        x: { type: Type.NUMBER, description: 'Horizontal coordinate in points (0 to 1440)' },
+        y: { type: Type.NUMBER, description: 'Vertical coordinate in points (0 to 900)' },
+      },
+      required: ['x', 'y'],
+    },
+  },
+  {
+    name: 'mouse_drag',
+    description: 'Clicks and drags the mouse from (startX, startY) to (endX, endY).',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        startX: { type: Type.NUMBER, description: 'Start X coordinate in points' },
+        startY: { type: Type.NUMBER, description: 'Start Y coordinate in points' },
+        endX: { type: Type.NUMBER, description: 'End X coordinate in points' },
+        endY: { type: Type.NUMBER, description: 'End Y coordinate in points' },
+      },
+      required: ['startX', 'startY', 'endX', 'endY'],
+    },
+  },
+  {
+    name: 'type_text',
+    description: 'Types text into the currently active/focused window, app, or input field on the Mac.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        text: { type: Type.STRING, description: 'The text string to type' },
+      },
+      required: ['text'],
+    },
+  },
+  {
+    name: 'press_key',
+    description: 'Presses a special keyboard key like enter, return, tab, esc, space, delete, arrow-down, arrow-up, arrow-left, arrow-right.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        key: { type: Type.STRING, description: 'Key name (e.g. enter, esc, space, tab, delete, arrow-down)' },
+      },
+      required: ['key'],
+    },
+  },
+  {
+    name: 'hotkey',
+    description: 'Triggers a keyboard shortcut combination on macOS (e.g. "cmd+space" for Spotlight, "cmd+c" to copy, "cmd+v" to paste, "cmd+w" to close window/tab, "cmd+t" for new tab, "cmd+q" to quit).',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        combination: { type: Type.STRING, description: 'Shortcut combination like "cmd+space", "cmd+c", "cmd+v", "cmd+w"' },
+      },
+      required: ['combination'],
+    },
+  },
+  {
+    name: 'open_app',
+    description: 'Opens or switches to any macOS application by name (e.g. "Safari", "Notes", "Spotify", "Terminal", "Google Chrome", "Calculator", "System Settings").',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        appName: { type: Type.STRING, description: 'Name of the macOS application to open' },
+      },
+      required: ['appName'],
     },
   },
   {
@@ -197,6 +291,59 @@ export class PocketAgent {
       return res.output;
     }
 
+    if (trimmed.startsWith('/open ')) {
+      const appName = trimmed.substring(6).trim();
+      try {
+        const res = await openApp(appName);
+        const msg = `🚀 **Opened Mac app**: \`${res.appName}\``;
+        callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
+        return msg;
+      } catch (err: any) {
+        const msg = `⚠️ ${err.message}`;
+        callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
+        return msg;
+      }
+    }
+
+    if (trimmed.startsWith('/click ')) {
+      const parts = trimmed.substring(7).trim().split(/\s+/);
+      const x = parseFloat(parts[0]);
+      const y = parseFloat(parts[1]);
+      if (isNaN(x) || isNaN(y)) {
+        const msg = '⚠️ Usage: `/click <x> <y>` (e.g. `/click 500 400`)';
+        callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
+        return msg;
+      }
+      const res = await mouseClick({ x, y });
+      const msg = `🖱️ **Clicked mouse** at (${res.x}, ${res.y}) [${res.button}]`;
+      callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
+      return msg;
+    }
+
+    if (trimmed.startsWith('/type ')) {
+      const text = trimmed.substring(6);
+      await typeText(text);
+      const msg = `⌨️ **Typed into Mac**: "${text}"`;
+      callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
+      return msg;
+    }
+
+    if (trimmed.startsWith('/key ')) {
+      const keyName = trimmed.substring(5).trim();
+      const res = await pressKey(keyName);
+      const msg = `⌨️ **Pressed key**: \`${res.key}\``;
+      callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
+      return msg;
+    }
+
+    if (trimmed.startsWith('/hotkey ')) {
+      const combo = trimmed.substring(8).trim();
+      const res = await hotkey(combo);
+      const msg = `⌨️ **Executed shortcut**: \`${res.combination}\``;
+      callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
+      return msg;
+    }
+
     if (trimmed === '/system' || trimmed === '/sys') {
       const res = await executeShellCommand('pmset -g batt; uptime');
       callbacks.onUpdateMessage(assistantMessageId, {
@@ -217,7 +364,7 @@ export class PocketAgent {
     // 2. If no Gemini API Key is configured yet, guide the user
     if (!this.hasKey()) {
       const msg =
-        "🔑 **PocketBridge is ready!**\n\nTo enable full autonomous AI actions (natural language tool execution, testing apps, web searches, and auto-screenshots), please enter your **Gemini API Key** in the **Settings** modal.\n\n*In the meantime, you can test immediate direct commands:*\n- `/screenshot` — Grab live desktop screenshot\n- `/git status` — Run git commands\n- `/sh <command>` — Run any terminal command directly";
+        "🔑 **PocketBridge is ready!**\n\nTo enable full autonomous AI actions (natural language tool execution, testing apps, web searches, and auto-screenshots), please enter your **Gemini API Key** in the **Settings** modal.\n\n*In the meantime, you can test immediate direct commands:*\n- `/screenshot` — Grab live desktop screenshot\n- `/open <app>` — Open any Mac app (e.g. /open Safari)\n- `/click <x> <y>` — Click coordinates on Mac screen\n- `/type <text>` — Type text into active window\n- `/key <key>` — Press key (enter, space, esc, tab)\n- `/hotkey <combo>` — Shortcut (e.g. /hotkey cmd+space)\n- `/git status` — Run git commands\n- `/sh <command>` — Run any terminal command directly";
       callbacks.onUpdateMessage(assistantMessageId, {
         status: 'done',
         content: msg,
@@ -263,15 +410,25 @@ export class PocketAgent {
       const systemInstruction = `You are PocketBridge, the autonomous AI assistant running on this Mac laptop.
 The user is controlling you from their mobile phone or remote computer.
 Your job is to assist them with:
+- Autonomously controlling and navigating the Mac GUI ("Computer Use"):
+  * Open apps with open_app (e.g. open_app('Safari'), open_app('Notes'), open_app('Spotify'))
+  * Search and spotlight with hotkey('cmd+space'), type_text, and press_key('enter')
+  * Move the cursor and click buttons/elements with mouse_click(x, y)
+  * Drag or select with mouse_drag(startX, startY, endX, endY)
+  * Type text into inputs or active windows with type_text(text)
+  * Press keys with press_key(key) (enter, space, tab, esc, arrow-down, etc.)
+  * Trigger shortcuts with hotkey(combination) (cmd+c, cmd+v, cmd+w, cmd+t, cmd+q)
+- Screen display resolution: The Mac display is 1440 x 900 points.
+- Before clicking or typing if you need to locate a UI element, call take_screenshot!
+- After completing an interaction or opening an app, call take_screenshot so the user can verify the result on their phone!
 - Testing and running apps (using execute_command)
-- Taking screenshots of the desktop or apps and returning them so the user can inspect them on their phone (using take_screenshot)
 - Checking and using GitHub (git status, commit, pull, branch, etc. using execute_command)
 - Searching the web for documentation, solutions, and updates (using search_web)
 - Sending Telegram messages to other people (using send_telegram_message)
 
 Guidelines:
 1. Always be concise, helpful, and direct.
-2. Whenever the user asks to "show me", "check the screen", "see what is running", or after launching a GUI app, call take_screenshot!
+2. Whenever the user asks to "show me", "check the screen", "open [app]", or interact with GUI elements, call take_screenshot to confirm!
 3. Format output cleanly in Markdown.
 4. Execute tests and check exit codes carefully.
 `;
@@ -430,6 +587,41 @@ Guidelines:
                 query,
                 results: searchResults,
               };
+            } else if (call.name === 'mouse_click') {
+              const x = Number(call.args?.x || 0);
+              const y = Number(call.args?.y || 0);
+              const button = call.args?.button === 'right' ? 'right' : 'left';
+              const doubleClick = Boolean(call.args?.doubleClick);
+              const clickRes = await mouseClick({ x, y, button, doubleClick });
+              functionResult = clickRes;
+            } else if (call.name === 'mouse_move') {
+              const x = Number(call.args?.x || 0);
+              const y = Number(call.args?.y || 0);
+              const moveRes = await mouseMove(x, y);
+              functionResult = moveRes;
+            } else if (call.name === 'mouse_drag') {
+              const startX = Number(call.args?.startX || 0);
+              const startY = Number(call.args?.startY || 0);
+              const endX = Number(call.args?.endX || 0);
+              const endY = Number(call.args?.endY || 0);
+              const dragRes = await mouseDrag(startX, startY, endX, endY);
+              functionResult = dragRes;
+            } else if (call.name === 'type_text') {
+              const text = String(call.args?.text || '');
+              const typeRes = await typeText(text);
+              functionResult = typeRes;
+            } else if (call.name === 'press_key') {
+              const key = String(call.args?.key || '');
+              const keyRes = await pressKey(key);
+              functionResult = keyRes;
+            } else if (call.name === 'hotkey') {
+              const combination = String(call.args?.combination || '');
+              const hkRes = await hotkey(combination);
+              functionResult = hkRes;
+            } else if (call.name === 'open_app') {
+              const appName = String(call.args?.appName || '');
+              const openRes = await openApp(appName);
+              functionResult = openRes;
             } else if (call.name === 'send_telegram_message') {
               const recipient = String(call.args?.recipient || '');
               const message = String(call.args?.message || '');

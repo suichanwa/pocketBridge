@@ -22,6 +22,12 @@ import {
   Download,
   X,
   Trash2,
+  MousePointer,
+  Type,
+  Keyboard,
+  Command,
+  ExternalLink,
+  Move,
 } from 'lucide-react';
 import { MarkdownView } from './MarkdownView.js';
 import type { ChatMessage, ToolCallRecord } from '../../shared/types.js';
@@ -42,6 +48,31 @@ const AVAILABLE_COMMANDS: CommandOption[] = [
     name: '/camera',
     description: 'Snap photo from Mac FaceTime HD webcam',
     icon: Video,
+  },
+  {
+    name: '/open ',
+    description: 'Open any Mac application (e.g. /open Safari, /open Notes)',
+    icon: ExternalLink,
+  },
+  {
+    name: '/click ',
+    description: 'Click coordinates on Mac screen (e.g. /click 500 400)',
+    icon: MousePointer,
+  },
+  {
+    name: '/type ',
+    description: 'Type text into currently focused Mac window or input',
+    icon: Type,
+  },
+  {
+    name: '/key ',
+    description: 'Press a key (e.g. /key enter, /key space, /key esc)',
+    icon: Keyboard,
+  },
+  {
+    name: '/hotkey ',
+    description: 'Run shortcut (e.g. /hotkey cmd+space, /hotkey cmd+c)',
+    icon: Command,
   },
   {
     name: '/clear',
@@ -150,6 +181,19 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
         return <Camera className="w-3.5 h-3.5 text-sky-400" />;
       case 'take_camera_photo':
         return <Video className="w-3.5 h-3.5 text-violet-400" />;
+      case 'mouse_click':
+        return <MousePointer className="w-3.5 h-3.5 text-rose-400" />;
+      case 'mouse_move':
+      case 'mouse_drag':
+        return <Move className="w-3.5 h-3.5 text-cyan-400" />;
+      case 'type_text':
+        return <Type className="w-3.5 h-3.5 text-indigo-400" />;
+      case 'press_key':
+        return <Keyboard className="w-3.5 h-3.5 text-orange-400" />;
+      case 'hotkey':
+        return <Command className="w-3.5 h-3.5 text-yellow-400" />;
+      case 'open_app':
+        return <ExternalLink className="w-3.5 h-3.5 text-blue-400" />;
       case 'execute_command':
         return <Terminal className="w-3.5 h-3.5 text-emerald-400" />;
       case 'search_web':
