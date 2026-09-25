@@ -27,7 +27,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSaveSettings,
 }) => {
   const [geminiKey, setGeminiKey] = useState('');
-  const [modelTier, setModelTier] = useState<'flash' | 'pro'>(status?.modelTier || 'flash');
+  const [modelTier, setModelTier] = useState<'flash' | 'pro'>(status?.modelTier || 'pro');
   const [accessPin, setAccessPin] = useState(localStorage.getItem('pb_pin') || '');
   const [tgId, setTgId] = useState('');
   const [tgHash, setTgHash] = useState('');
@@ -142,10 +142,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 AI Model Tier
               </span>
               <Badge variant="outline" className="text-[10px] py-0 px-1.5 font-normal">
-                {modelTier === 'pro' ? 'Gemini Pro' : 'Gemini Flash'}
+                {modelTier === 'pro' ? 'Gemini 3.8 Flash High (AGY)' : 'Gemini Flash'}
               </Badge>
             </label>
             <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setModelTier('pro')}
+                className={`p-2.5 rounded-xl border text-left text-xs transition-all ${
+                  modelTier === 'pro'
+                    ? 'border-violet-500 bg-violet-500/10 text-foreground ring-1 ring-violet-500'
+                    : 'border-border/60 bg-secondary/40 text-muted-foreground hover:bg-secondary/60'
+                }`}
+              >
+                <span className="font-semibold block text-violet-400">🧠 Pro (Default)</span>
+                <span className="text-[10px] text-muted-foreground block mt-0.5 leading-snug">
+                  Gemini 3.8 Flash High via Antigravity (--dangerously-skip-permissions)
+                </span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setModelTier('flash')}
@@ -157,22 +172,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               >
                 <span className="font-semibold block text-primary">⚡ Flash</span>
                 <span className="text-[10px] text-muted-foreground block mt-0.5 leading-snug">
-                  Ultra-fast, free tier, recommended for Mac control
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setModelTier('pro')}
-                className={`p-2.5 rounded-xl border text-left text-xs transition-all ${
-                  modelTier === 'pro'
-                    ? 'border-violet-500 bg-violet-500/10 text-foreground ring-1 ring-violet-500'
-                    : 'border-border/60 bg-secondary/40 text-muted-foreground hover:bg-secondary/60'
-                }`}
-              >
-                <span className="font-semibold block text-violet-400">🧠 Pro</span>
-                <span className="text-[10px] text-muted-foreground block mt-0.5 leading-snug">
-                  Deep reasoning (requires billing linked on Google Cloud)
+                  Lightweight Gemini Flash for basic Mac control
                 </span>
               </button>
             </div>

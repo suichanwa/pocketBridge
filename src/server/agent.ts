@@ -232,9 +232,9 @@ export class PocketAgent {
   private apiKey: string;
   private modelTier: 'flash' | 'pro';
 
-  constructor(apiKey?: string, modelTier: 'flash' | 'pro' = 'flash') {
+  constructor(apiKey?: string, modelTier: 'flash' | 'pro' = 'pro') {
     this.apiKey = apiKey || process.env.GEMINI_API_KEY || '';
-    this.modelTier = (process.env.MODEL_TIER as any) === 'pro' ? 'pro' : modelTier;
+    this.modelTier = (process.env.MODEL_TIER as any) === 'flash' ? 'flash' : (modelTier || 'pro');
   }
 
   public updateApiKey(key: string) {
@@ -513,7 +513,48 @@ export class PocketAgent {
       return 'Chat cleared.';
     }
 
-    // 2. If no Gemini API Key is configured yet, guide the user
+    // 2. If Pro mode is active (default), execute directly via Antigravity Engine (Gemini 3.8 Flash High)
+    if (this.modelTier === 'pro') {
+      const logId = `term-${Date.now()}`;
+      const continues = history.length > 0;
+      callbacks.onTerminalLog({
+        id: logId,
+        command: `agy --model gemini-3.8-flash-high --dangerously-skip-permissions ${continues ? '-c ' : ''}-p "${trimmed.replace(/"/g, '\\"')}"`,
+        output: '',
+        status: 'running',
+        timestamp: Date.now(),
+      });
+
+      callbacks.onUpdateMessage(assistantMessageId, {
+        status: 'thinking',
+        content: '🧠 Thinking with Antigravity (Gemini 3.8 Flash High)...',
+      });
+
+      const res = await runAgyTask({
+        prompt: trimmed,
+        continueSession: continues,
+        onChunk: (chunk) => callbacks.onTerminalChunk(logId, chunk),
+      });
+
+      callbacks.onTerminalChunk(logId, '', res.exitCode);
+
+      // Check if output mentions any captured photos or screenshots
+      const shotMatch = res.output.match(/\/captures\/(shot|camera)-[a-zA-Z0-9_\-.]+\.(?:png|jpg)/);
+      const screenshotUrl = shotMatch ? shotMatch[0] : undefined;
+      if (screenshotUrl) {
+        callbacks.onScreenshotReady(screenshotUrl);
+      }
+
+      callbacks.onUpdateMessage(assistantMessageId, {
+        status: res.exitCode === 0 ? 'done' : 'error',
+        content: res.output,
+        screenshotUrl,
+      });
+
+      return res.output;
+    }
+
+    // 3. Flash Mode: If no Gemini API Key is configured yet, guide the user
     if (!this.hasKey()) {
       const msg =
         "🔑 **PocketBridge is ready!**\n\nTo enable full autonomous AI actions (natural language tool execution, testing apps, web searches, and auto-screenshots), please enter your **Gemini API Key** in the **Settings** modal.\n\n*In the meantime, you can test immediate direct commands:*\n- `/screenshot` — Grab live desktop screenshot\n- `/open <app>` — Open any Mac app (e.g. /open Safari)\n- `/click <x> <y>` — Click coordinates on Mac screen\n- `/type <text>` — Type text into active window\n- `/key <key>` — Press key (enter, space, esc, tab)\n- `/hotkey <combo>` — Shortcut (e.g. /hotkey cmd+space)\n- `/git status` — Run git commands\n- `/sh <command>` — Run any terminal command directly";

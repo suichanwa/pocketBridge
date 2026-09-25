@@ -6,6 +6,7 @@ export interface AgyTaskOptions {
   model?: string;
   cwd?: string;
   timeoutMs?: number;
+  continueSession?: boolean;
   onChunk?: (chunk: string) => void;
 }
 
@@ -32,9 +33,13 @@ export async function runAgyTask(options: AgyTaskOptions): Promise<AgyTaskResult
     '--model',
     model,
     '--dangerously-skip-permissions',
-    '-p',
-    options.prompt,
   ];
+
+  if (options.continueSession) {
+    args.push('-c');
+  }
+
+  args.push('-p', options.prompt);
 
   let combinedOutput = '';
 
