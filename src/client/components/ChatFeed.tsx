@@ -44,6 +44,11 @@ interface CommandOption {
 
 const AVAILABLE_COMMANDS: CommandOption[] = [
   {
+    name: '/agy ',
+    description: 'Run task via Antigravity (Gemini 3.8 Flash High, --dangerously-skip-permissions)',
+    icon: Sparkles,
+  },
+  {
     name: '/screenshot',
     description: 'Capture live Mac desktop screen & windows',
     icon: Camera,

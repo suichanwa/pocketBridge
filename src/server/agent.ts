@@ -5,6 +5,7 @@ import { executeShellCommand } from './tools/shell.js';
 import { searchWeb } from './tools/search.js';
 import { sendTelegramMessage } from './tools/telegram.js';
 import { speakAloud } from './tools/speech.js';
+import { runAgyTask } from './tools/agy.js';
 import {
   mouseClick,
   mouseMove,
@@ -206,6 +207,25 @@ const agentToolDeclarations = [
       required: ['text'],
     },
   },
+  {
+    name: 'run_agy_task',
+    description:
+      'Delegates complex, heavy, deep-thinking, coding, refactoring, bug-fixing, multi-file editing, or system engineering tasks to Google Antigravity CLI (agy) running Gemini 3.8 Flash High with full autonomous capabilities and auto-approved permissions (--dangerously-skip-permissions). Use this whenever a task is hard, requires deep code understanding, multi-step problem solving, or modifying project files.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        prompt: {
+          type: Type.STRING,
+          description: 'The exact high-level instruction, bug description, or complex goal to delegate to Antigravity (agy).',
+        },
+        model: {
+          type: Type.STRING,
+          description: 'Optional model to use in agy (defaults to "gemini-3.8-flash-high", can also use "claude-sonnet-4-6" or "gemini-3.1-pro-high")',
+        },
+      },
+      required: ['prompt'],
+    },
+  },
 ];
 
 export class PocketAgent {
@@ -245,6 +265,43 @@ export class PocketAgent {
     const trimmed = userText.trim();
 
     // 1. Check for quick slash commands (for instant offline responses / shortcuts)
+    if (trimmed.startsWith('/agy ') || trimmed.startsWith('/antigravity ')) {
+      const cmdPrefix = trimmed.startsWith('/agy ') ? '/agy ' : '/antigravity ';
+      const agyPrompt = trimmed.substring(cmdPrefix.length).trim();
+      if (!agyPrompt) {
+        const msg = '⚠️ Usage: `/agy <task>` (e.g. `/agy fix tests in server.ts`)';
+        callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
+        return msg;
+      }
+
+      const logId = `term-${Date.now()}`;
+      callbacks.onTerminalLog({
+        id: logId,
+        command: `agy --model gemini-3.8-flash-high --dangerously-skip-permissions -p "${agyPrompt.replace(/"/g, '\\"')}"`,
+        output: '',
+        status: 'running',
+        timestamp: Date.now(),
+      });
+
+      callbacks.onUpdateMessage(assistantMessageId, {
+        status: 'thinking',
+        content: `⚡ **Delegating to Antigravity CLI (Gemini 3.8 Flash High)**...\n> "${agyPrompt}"\n\n*Running autonomously with \`--dangerously-skip-permissions\`...*`,
+      });
+
+      const res = await runAgyTask({
+        prompt: agyPrompt,
+        onChunk: (chunk) => callbacks.onTerminalChunk(logId, chunk),
+      });
+
+      callbacks.onTerminalChunk(logId, '', res.exitCode);
+      const msg = `⚡ **Antigravity Result** (Gemini 3.8 Flash High):\n\n${res.output}`;
+      callbacks.onUpdateMessage(assistantMessageId, {
+        status: res.exitCode === 0 ? 'done' : 'error',
+        content: msg,
+      });
+      return res.output;
+    }
+
     if (trimmed.startsWith('/screenshot')) {
       callbacks.onUpdateMessage(assistantMessageId, {
         status: 'thinking',
@@ -521,6 +578,11 @@ Your job is to assist them with:
 - Searching the web for documentation, solutions, and updates (using search_web)
 - Sending Telegram messages or circular voice notes to other people or to "me" (using send_telegram_message; set isVoiceNote: true when asked to send a voice note/message)
 - Speaking out loud through the Mac's speakers (using speak_aloud) when asked to speak, announce, say something, or talk
+- DELEGATING HARD / COMPLEX TASKS TO ANTIGRAVITY (AGY):
+  * You have access to the powerful tool: run_agy_task(prompt, model)!
+  * Whenever the user asks you to write complex code, refactor repositories, fix bugs, inspect large codebases, execute multi-step developer workflows, or do hard engineering, DO NOT try to write brittle bash scripts or do guesswork!
+  * Delegate the task immediately using run_agy_task!
+  * Antigravity runs Gemini 3.8 Flash High with --dangerously-skip-permissions and full autonomous agent capabilities.
 
 Guidelines:
 1. Always be concise, helpful, and direct.
@@ -528,25 +590,19 @@ Guidelines:
 3. When asked to send a voice note on Telegram, call send_telegram_message with isVoiceNote: true!
 4. Format output cleanly in Markdown.
 5. Execute tests and check exit codes carefully.
+6. If a task requires deep code editing, project building, fixing tricky bugs, or writing files across repositories, delegate it via run_agy_task!
 `;
 
       const candidateModels =
         this.modelTier === 'pro'
           ? [
-              'gemini-3.6-flash',
-              'gemini-flash-lite-latest',
-              'gemini-3.1-flash-lite',
               'gemini-pro-latest',
-              'gemini-3.1-pro-preview',
+              'gemini-flash-latest',
+              'gemini-flash-lite-latest',
             ]
           : [
-              'gemini-3.6-flash',
-              'gemini-flash-lite-latest',
-              'gemini-3.1-flash-lite',
-              'gemini-3.5-flash-lite',
-              'gemini-3-flash-preview',
               'gemini-flash-latest',
-              'gemini-3.7-flash',
+              'gemini-flash-lite-latest',
             ];
 
       const generateWithFallback = async (contents: any[]) => {
@@ -740,6 +796,39 @@ Guidelines:
 
               const tgRes = await sendTelegramMessage({ recipient, message, mediaPath, mediaPaths, isVoiceNote });
               functionResult = tgRes;
+            } else if (call.name === 'run_agy_task') {
+              const prompt = String(call.args?.prompt || '');
+              const model = call.args?.model ? String(call.args.model) : 'gemini-3.8-flash-high';
+              const logId = `term-${Date.now()}`;
+
+              callbacks.onTerminalLog({
+                id: logId,
+                command: `agy --model ${model} --dangerously-skip-permissions -p "${prompt.replace(/"/g, '\\"')}"`,
+                output: '',
+                status: 'running',
+                timestamp: Date.now(),
+              });
+
+              callbacks.onUpdateMessage(assistantMessageId, {
+                status: 'thinking',
+                content: `⚡ **Delegating to Antigravity (${model})**...\n> "${prompt}"`,
+                toolCalls: [...toolRecords],
+              });
+
+              const agyRes = await runAgyTask({
+                prompt,
+                model,
+                onChunk: (chunk) => callbacks.onTerminalChunk(logId, chunk),
+              });
+
+              callbacks.onTerminalChunk(logId, '', agyRes.exitCode);
+              functionResult = {
+                status: agyRes.exitCode === 0 ? 'success' : 'failed',
+                model: agyRes.model,
+                output: agyRes.output,
+                exitCode: agyRes.exitCode,
+                durationMs: agyRes.durationMs,
+              };
             } else {
               functionResult = { error: `Unknown tool: ${call.name}` };
             }
