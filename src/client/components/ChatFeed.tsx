@@ -28,6 +28,10 @@ import {
   Command,
   ExternalLink,
   Move,
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { MarkdownView } from './MarkdownView.js';
 import type { ChatMessage, ToolCallRecord } from '../../shared/types.js';
@@ -95,6 +99,16 @@ const AVAILABLE_COMMANDS: CommandOption[] = [
     icon: Send,
   },
   {
+    name: '/tgvoice ',
+    description: 'Send Telegram circular voice note (e.g. /tgvoice me Audio note)',
+    icon: Mic,
+  },
+  {
+    name: '/say ',
+    description: 'Speak text out loud on Mac speakers (e.g. /say Hello)',
+    icon: Volume2,
+  },
+  {
     name: '/sh ',
     description: 'Run arbitrary terminal command (e.g. /sh ls -la)',
     icon: Terminal,
@@ -117,9 +131,12 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [selectedCmdIndex, setSelectedCmdIndex] = useState(0);
   const [showCommands, setShowCommands] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<any>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -180,12 +197,101 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
     setExpandedTools((prev) => ({ ...prev, [toolId]: !prev[toolId] }));
   };
 
+  const toggleListening = () => {
+    if (isListening) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      alert('Speech recognition is not supported in this browser. Please use iOS Safari, Chrome, or Edge.');
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognitionRef.current = recognition;
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = navigator.language || 'en-US';
+
+      recognition.onstart = () => {
+        setIsListening(true);
+      };
+
+      recognition.onresult = (event: any) => {
+        let transcript = '';
+        for (let i = 0; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        if (transcript) {
+          setInputText(transcript);
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        console.warn('Speech recognition error:', event.error);
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognition.start();
+    } catch (err) {
+      console.error('Failed to initiate speech recognition:', err);
+      setIsListening(false);
+    }
+  };
+
+  const handleToggleSpeak = (msgId: string, text: string) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+
+    if (speakingMsgId === msgId) {
+      window.speechSynthesis.cancel();
+      setSpeakingMsgId(null);
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+
+    // Clean up markdown / code blocks / urls before speaking
+    const clean = text
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/https?:\/\/\S+/g, '')
+      .replace(/[#*_~>]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!clean) return;
+
+    const utterance = new SpeechSynthesisUtterance(clean);
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+    utterance.onend = () => setSpeakingMsgId(null);
+    utterance.onerror = () => setSpeakingMsgId(null);
+
+    setSpeakingMsgId(msgId);
+    window.speechSynthesis.speak(utterance);
+  };
+
   const getToolIcon = (name: string) => {
     switch (name) {
       case 'take_screenshot':
         return <Camera className="w-3.5 h-3.5 text-sky-400" />;
       case 'take_camera_photo':
         return <Video className="w-3.5 h-3.5 text-violet-400" />;
+      case 'speak_aloud':
+        return <Volume2 className="w-3.5 h-3.5 text-pink-400" />;
       case 'mouse_click':
         return <MousePointer className="w-3.5 h-3.5 text-rose-400" />;
       case 'mouse_move':
@@ -396,17 +502,44 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                   })()}
                 </div>
 
-                {/* Timestamp */}
-                <span
-                  className={`text-[10px] text-muted-foreground px-1 ${
-                    isUser ? 'text-right' : 'text-left'
+                {/* Timestamp & Listen */}
+                <div
+                  className={`flex items-center gap-2 px-1 ${
+                    isUser ? 'justify-end' : 'justify-between'
                   }`}
                 >
-                  {new Date(msg.timestamp).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </span>
+                  <span className="text-[10px] text-muted-foreground">
+                    {new Date(msg.timestamp).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+
+                  {!isUser && msg.content && (
+                    <button
+                      type="button"
+                      onClick={() => handleToggleSpeak(msg.id, msg.content)}
+                      title={speakingMsgId === msg.id ? 'Stop listening' : 'Read aloud on this device'}
+                      className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full transition-colors ${
+                        speakingMsgId === msg.id
+                          ? 'bg-primary text-primary-foreground font-medium animate-pulse'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-secondary/80'
+                      }`}
+                    >
+                      {speakingMsgId === msg.id ? (
+                        <>
+                          <VolumeX className="w-3 h-3" />
+                          <span>Stop</span>
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 className="w-3 h-3 text-primary" />
+                          <span>Read Aloud</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           );
@@ -468,10 +601,27 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Type a message or '/' for commands..."
+            placeholder={isListening ? '🎙️ Listening to your voice...' : "Type a message or '/' for commands..."}
             disabled={disabled}
-            className="flex-1 bg-secondary/50 border-border/60 rounded-xl px-3.5 py-2 h-10 text-sm focus-visible:ring-1 focus-visible:ring-primary font-normal"
+            className={`flex-1 bg-secondary/50 border-border/60 rounded-xl px-3.5 py-2 h-10 text-sm focus-visible:ring-1 focus-visible:ring-primary font-normal ${
+              isListening ? 'ring-2 ring-rose-500 bg-rose-500/10 placeholder:text-rose-400' : ''
+            }`}
           />
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={toggleListening}
+            disabled={disabled}
+            title={isListening ? 'Stop listening' : 'Voice Input (Speech-to-Text)'}
+            className={`h-10 w-10 shrink-0 rounded-xl transition-all ${
+              isListening
+                ? 'bg-rose-500 hover:bg-rose-600 text-white animate-pulse ring-2 ring-rose-400/50 shadow-md border-transparent'
+                : 'bg-secondary/70 hover:bg-secondary text-muted-foreground hover:text-foreground border-border/60'
+            }`}
+          >
+            {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+          </Button>
           <Button
             type="submit"
             size="icon"

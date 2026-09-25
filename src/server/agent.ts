@@ -4,6 +4,7 @@ import { takeCameraPhoto } from './tools/camera.js';
 import { executeShellCommand } from './tools/shell.js';
 import { searchWeb } from './tools/search.js';
 import { sendTelegramMessage } from './tools/telegram.js';
+import { speakAloud } from './tools/speech.js';
 import {
   mouseClick,
   mouseMove,
@@ -185,8 +186,24 @@ const agentToolDeclarations = [
           items: { type: Type.STRING },
           description: 'Optional list of multiple image paths/URLs to send as actual photo files to Telegram',
         },
+        isVoiceNote: {
+          type: Type.BOOLEAN,
+          description: 'Set true to synthesize and deliver this message as an authentic Telegram voice note audio recording instead of text',
+        },
       },
       required: ['recipient', 'message'],
+    },
+  },
+  {
+    name: 'speak_aloud',
+    description: 'Speaks text out loud through the Mac laptop built-in speakers using macOS speech synthesis.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        text: { type: Type.STRING, description: 'The text message to speak out loud' },
+        voice: { type: Type.STRING, description: 'Optional voice name (e.g. "Samantha", "Daniel", "Fred", "Victoria")' },
+      },
+      required: ['text'],
     },
   },
 ];
@@ -376,6 +393,52 @@ export class PocketAgent {
       }
     }
 
+    if (trimmed.startsWith('/say ')) {
+      const textToSpeak = trimmed.substring(5).trim();
+      if (!textToSpeak) {
+        const msg = '⚠️ Usage: `/say <text>` (e.g. `/say Hello from my phone!`)';
+        callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
+        return msg;
+      }
+      callbacks.onUpdateMessage(assistantMessageId, {
+        status: 'thinking',
+        content: `Speaking on Mac speakers: "${textToSpeak}"...`,
+      });
+      await speakAloud(textToSpeak);
+      const msg = `🗣️ **Spoke aloud on Mac speakers**:\n> "${textToSpeak}"`;
+      callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
+      return msg;
+    }
+
+    if (trimmed.startsWith('/tgvoice ') || trimmed.startsWith('/voice ')) {
+      const cmdPrefix = trimmed.startsWith('/tgvoice ') ? '/tgvoice ' : '/voice ';
+      const rest = trimmed.substring(cmdPrefix.length).trim();
+      const firstSpace = rest.indexOf(' ');
+      if (firstSpace === -1) {
+        const msg = '⚠️ Usage: `/tgvoice <recipient> <message>`\n*Examples:*\n- `/tgvoice me Hello from my Mac voice note!`\n- `/tgvoice @username Hey, listen to this!`';
+        callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
+        return msg;
+      }
+      const recipient = rest.substring(0, firstSpace).trim();
+      const message = rest.substring(firstSpace + 1).trim();
+
+      callbacks.onUpdateMessage(assistantMessageId, {
+        status: 'thinking',
+        content: `Synthesizing and sending Telegram voice note to \`${recipient}\`...`,
+      });
+
+      const res = await sendTelegramMessage({ recipient, message, isVoiceNote: true });
+      if (res.success) {
+        const msg = `🎙️ **Telegram Voice Note delivered** to \`${res.recipient}\`:\n> "${message}"`;
+        callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
+        return msg;
+      } else {
+        const msg = `⚠️ **Failed to send Telegram voice note**: ${res.error}`;
+        callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
+        return msg;
+      }
+    }
+
     if (trimmed === '/system' || trimmed === '/sys') {
       const res = await executeShellCommand('pmset -g batt; uptime');
       callbacks.onUpdateMessage(assistantMessageId, {
@@ -456,13 +519,15 @@ Your job is to assist them with:
 - Testing and running apps (using execute_command)
 - Checking and using GitHub (git status, commit, pull, branch, etc. using execute_command)
 - Searching the web for documentation, solutions, and updates (using search_web)
-- Sending Telegram messages to other people (using send_telegram_message)
+- Sending Telegram messages or circular voice notes to other people or to "me" (using send_telegram_message; set isVoiceNote: true when asked to send a voice note/message)
+- Speaking out loud through the Mac's speakers (using speak_aloud) when asked to speak, announce, say something, or talk
 
 Guidelines:
 1. Always be concise, helpful, and direct.
 2. Whenever the user asks to "show me", "check the screen", "open [app]", or interact with GUI elements, call take_screenshot to confirm!
-3. Format output cleanly in Markdown.
-4. Execute tests and check exit codes carefully.
+3. When asked to send a voice note on Telegram, call send_telegram_message with isVoiceNote: true!
+4. Format output cleanly in Markdown.
+5. Execute tests and check exit codes carefully.
 `;
 
       const candidateModels =
@@ -528,7 +593,7 @@ Guidelines:
         );
 
         // If there are no function calls, we have the final assistant answer!
-        if (!functionCalls || functionCalls.length === 0) {
+        if (!candidate || !functionCalls || functionCalls.length === 0) {
           const finalText = response.text || 'Done.';
           callbacks.onUpdateMessage(assistantMessageId, {
             status: 'done',
@@ -548,6 +613,7 @@ Guidelines:
 
         for (const part of functionCalls) {
           const call = part.functionCall;
+          if (!call || !call.name) continue;
           const callId = `call-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
           const record: ToolCallRecord = {
             id: callId,
@@ -658,6 +724,11 @@ Guidelines:
               const appName = String(call.args?.appName || '');
               const openRes = await openApp(appName);
               functionResult = openRes;
+            } else if (call.name === 'speak_aloud') {
+              const text = String(call.args?.text || '');
+              const voice = call.args?.voice ? String(call.args.voice) : undefined;
+              const speakRes = await speakAloud(text, voice);
+              functionResult = speakRes;
             } else if (call.name === 'send_telegram_message') {
               const recipient = String(call.args?.recipient || '');
               const message = String(call.args?.message || '');
@@ -665,8 +736,9 @@ Guidelines:
               const mediaPaths = Array.isArray(call.args?.mediaPaths)
                 ? call.args.mediaPaths.map(String)
                 : (capturedMediaUrls.length > 0 ? [...capturedMediaUrls] : undefined);
+              const isVoiceNote = Boolean(call.args?.isVoiceNote);
 
-              const tgRes = await sendTelegramMessage({ recipient, message, mediaPath, mediaPaths });
+              const tgRes = await sendTelegramMessage({ recipient, message, mediaPath, mediaPaths, isVoiceNote });
               functionResult = tgRes;
             } else {
               functionResult = { error: `Unknown tool: ${call.name}` };

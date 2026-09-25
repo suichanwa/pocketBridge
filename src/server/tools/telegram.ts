@@ -3,6 +3,8 @@ import { StringSession } from 'telegram/sessions/index.js';
 import path from 'node:path';
 import fs from 'node:fs';
 
+import { synthesizeVoiceNote } from './speech.js';
+
 let clientInstance: TelegramClient | null = null;
 
 export interface SendTelegramParams {
@@ -10,6 +12,7 @@ export interface SendTelegramParams {
   message: string;
   mediaPath?: string;
   mediaPaths?: string[];
+  isVoiceNote?: boolean;
 }
 
 export interface TelegramStatus {
@@ -125,6 +128,20 @@ export async function sendTelegramMessage(params: SendTelegramParams): Promise<{
   const client = await getTelegramClient();
   if (client) {
     try {
+      if (params.isVoiceNote) {
+        const voicePath = await synthesizeVoiceNote(params.message);
+        const result: any = await client.sendFile(targetRecipient, {
+          file: voicePath,
+          voiceNote: true,
+        });
+
+        return {
+          success: true,
+          recipient: targetRecipient,
+          messageId: result.id,
+        };
+      }
+
       if (filesToSend.length > 0) {
         let lastId: number | undefined;
         for (let i = 0; i < filesToSend.length; i++) {

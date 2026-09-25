@@ -2,6 +2,7 @@ import { takeMacScreenshot } from '../src/server/tools/screenshot.js';
 import { executeShellCommand } from '../src/server/tools/shell.js';
 import { searchWeb } from '../src/server/tools/search.js';
 import { spawn } from 'node:child_process';
+// @ts-ignore
 import WebSocket from 'ws';
 import type { ServerMessage, ClientMessage } from '../src/shared/types.js';
 

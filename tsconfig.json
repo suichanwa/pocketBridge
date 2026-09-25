@@ -15,10 +15,9 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/client/*"],
-      "@shared/*": ["src/shared/*"]
+      "@/*": ["./src/client/*"],
+      "@shared/*": ["./src/shared/*"]
     }
   },
   "include": ["src", "test", "vite.config.ts"]
