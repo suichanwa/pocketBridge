@@ -7,3 +7,5 @@ dist/
 captures/*
 !captures/.gitkeep
 test-output/
+certs/
+bin/
