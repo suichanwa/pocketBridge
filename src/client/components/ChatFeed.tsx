@@ -21,6 +21,7 @@ import {
   Cpu,
   Download,
   X,
+  Trash2,
 } from 'lucide-react';
 import { MarkdownView } from './MarkdownView.js';
 import type { ChatMessage, ToolCallRecord } from '../../shared/types.js';
@@ -41,6 +42,11 @@ const AVAILABLE_COMMANDS: CommandOption[] = [
     name: '/camera',
     description: 'Snap photo from Mac FaceTime HD webcam',
     icon: Video,
+  },
+  {
+    name: '/clear',
+    description: 'Clear chat messages and history',
+    icon: Trash2,
   },
   {
     name: '/git status',
@@ -159,8 +165,31 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
     <div className="flex flex-col h-full bg-background overflow-hidden relative">
       {/* Scrollable message thread */}
       <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-4">
-        {messages.map((msg) => {
-          const isUser = msg.role === 'user';
+        {messages.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full min-h-[280px] text-center p-6 text-muted-foreground select-none">
+            <div className="w-12 h-12 rounded-2xl bg-secondary/80 border border-border/60 flex items-center justify-center mb-3 text-muted-foreground shadow-inner">
+              <Sparkles className="w-5 h-5 text-primary" />
+            </div>
+            <p className="text-sm font-semibold text-foreground">PocketBridge Ready</p>
+            <p className="text-xs text-muted-foreground mt-1.5 max-w-xs leading-relaxed">
+              Chat history is clear. Send a prompt to your Mac or type{' '}
+              <button
+                type="button"
+                onClick={() => {
+                  setInputText('/');
+                  setShowCommands(true);
+                  inputRef.current?.focus();
+                }}
+                className="inline-flex items-center px-1.5 py-0.5 rounded bg-secondary font-mono text-[11px] text-foreground hover:bg-secondary/80 border border-border/50 transition-colors"
+              >
+                /
+              </button>{' '}
+              to explore commands.
+            </p>
+          </div>
+        ) : (
+          messages.map((msg) => {
+            const isUser = msg.role === 'user';
           return (
             <div
               key={msg.id}
@@ -307,7 +336,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
               </div>
             </div>
           );
-        })}
+        }))}
         <div ref={messagesEndRef} />
       </div>
 

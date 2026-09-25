@@ -347,7 +347,15 @@ TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
         }
 
         if (clientMsg.type === 'chat_send') {
-          const userText = clientMsg.text;
+          const userText = clientMsg.text.trim();
+
+          // Fast direct /clear command
+          if (userText === '/clear') {
+            messages.length = 0;
+            broadcast({ type: 'chat_cleared' });
+            return;
+          }
+
           const userMsgId = `user-${Date.now()}`;
           const assistantMsgId = `asst-${Date.now() + 1}`;
 

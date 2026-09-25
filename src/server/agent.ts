@@ -206,6 +206,14 @@ export class PocketAgent {
       return res.output;
     }
 
+    if (trimmed === '/clear') {
+      callbacks.onUpdateMessage(assistantMessageId, {
+        status: 'done',
+        content: '🧹 Chat cleared.',
+      });
+      return 'Chat cleared.';
+    }
+
     // 2. If no Gemini API Key is configured yet, guide the user
     if (!this.hasKey()) {
       const msg =

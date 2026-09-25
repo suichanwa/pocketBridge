@@ -75,6 +75,10 @@ export function useAgentSocket() {
             }
             break;
 
+          case 'chat_cleared':
+            setMessages([]);
+            break;
+
           case 'terminal_log':
             setTerminalLogs((prev) => [...prev, msg.log]);
             break;

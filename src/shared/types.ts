@@ -70,6 +70,7 @@ export type ServerMessage =
   | { type: 'init_state'; messages: ChatMessage[]; terminalLogs: TerminalLog[]; status: SystemStatus }
   | { type: 'chat_message'; message: ChatMessage }
   | { type: 'chat_update'; messageId: string; partial: Partial<ChatMessage> }
+  | { type: 'chat_cleared' }
   | { type: 'terminal_log'; log: TerminalLog }
   | { type: 'terminal_log_update'; logId: string; chunk: string; exitCode?: number; status?: 'completed' | 'failed' }
   | { type: 'system_status'; status: SystemStatus }
