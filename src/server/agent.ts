@@ -16,13 +16,26 @@ import {
   openApp,
   getDisplayDimensions,
 } from './tools/cursor.js';
+import os from 'node:os';
 import type { ChatMessage, ToolCallRecord, TerminalLog } from '../shared/types.js';
+
+export interface SessionMetrics {
+  startTime: number;
+  totalRequests: number;
+  agyTasks: number;
+  geminiCalls: number;
+  screenshots: number;
+  shellCommands: number;
+  telegramMessages: number;
+  lastRequestTime?: number;
+}
 
 export interface AgentCallbacks {
   onUpdateMessage: (messageId: string, partial: Partial<ChatMessage>) => void;
   onTerminalLog: (log: TerminalLog) => void;
   onTerminalChunk: (logId: string, chunk: string, exitCode?: number) => void;
   onScreenshotReady: (url: string) => void;
+  onStatusChange?: (tier: 'flash' | 'pro', activeModel: string) => void;
 }
 
 // Function declarations for Gemini Tool Calling
@@ -231,10 +244,21 @@ const agentToolDeclarations = [
 export class PocketAgent {
   private apiKey: string;
   private modelTier: 'flash' | 'pro';
+  private customAgyModel: string = 'gemini-3.8-flash-high';
+  private metrics: SessionMetrics = {
+    startTime: Date.now(),
+    totalRequests: 0,
+    agyTasks: 0,
+    geminiCalls: 0,
+    screenshots: 0,
+    shellCommands: 0,
+    telegramMessages: 0,
+  };
 
-  constructor(apiKey?: string, modelTier: 'flash' | 'pro' = 'pro') {
+  constructor(apiKey?: string, modelTier: 'flash' | 'pro' = 'pro', activeModel?: string) {
     this.apiKey = apiKey || process.env.GEMINI_API_KEY || '';
     this.modelTier = (process.env.MODEL_TIER as any) === 'flash' ? 'flash' : (modelTier || 'pro');
+    this.customAgyModel = activeModel || process.env.ACTIVE_MODEL || 'gemini-3.8-flash-high';
   }
 
   public updateApiKey(key: string) {
@@ -247,6 +271,28 @@ export class PocketAgent {
 
   public getModelTier(): 'flash' | 'pro' {
     return this.modelTier;
+  }
+
+  public setCustomAgyModel(model: string) {
+    this.customAgyModel = model;
+  }
+
+  public getCustomAgyModel(): string {
+    return this.customAgyModel;
+  }
+
+  public getActiveModel(): string {
+    return this.modelTier === 'pro' ? this.customAgyModel : 'gemini-flash-latest';
+  }
+
+  public getMetrics(): SessionMetrics {
+    return this.metrics;
+  }
+
+  public recordMetric(type: keyof Omit<SessionMetrics, 'startTime' | 'totalRequests' | 'lastRequestTime'>) {
+    this.metrics[type]++;
+    this.metrics.totalRequests++;
+    this.metrics.lastRequestTime = Date.now();
   }
 
   public hasKey(): boolean {
@@ -264,7 +310,111 @@ export class PocketAgent {
   ): Promise<string> {
     const trimmed = userText.trim();
 
-    // 1. Check for quick slash commands (for instant offline responses / shortcuts)
+    // 1. Check for /model command
+    if (trimmed === '/model' || trimmed.startsWith('/model ')) {
+      const arg = trimmed.substring(6).trim();
+      const lowerArg = arg.toLowerCase();
+
+      if (!arg || lowerArg === 'status' || lowerArg === 'info' || lowerArg === 'list') {
+        const isPro = this.modelTier === 'pro';
+        const activeEngineDesc = isPro
+          ? '**Pro** (Google Antigravity CLI)'
+          : '**Flash** (Google Gemini API)';
+        const activeModelName = isPro
+          ? `\`${this.customAgyModel}\``
+          : '`gemini-flash-latest`';
+
+        const infoMsg = [
+          `### Active Model Configuration\n`,
+          `- **Tier**: ${activeEngineDesc}`,
+          `- **Underlying Model**: ${activeModelName}`,
+          `- **Autonomous Permissions**: ${isPro ? 'Auto-approved (`--dangerously-skip-permissions`)' : 'Standard Tool Calling'}`,
+          `- **Context Mode**: ${isPro ? 'Multi-turn Session Continuity (`-c`)' : 'In-memory Conversation'}`,
+          `- **API Quota Restrictions**: ${isPro ? 'None (Runs on local Antigravity CLI, zero rate-limit errors)' : this.hasKey() ? 'Subject to Gemini API Key Quota' : 'No Gemini API Key configured in Settings'}`,
+          `\n**Switch Models:**`,
+          `- \`/model pro\` — Switch to Pro mode (Antigravity CLI: ${this.customAgyModel})`,
+          `- \`/model flash\` — Switch to Flash mode (Gemini API: gemini-flash-latest)`,
+          `- \`/model gemini-3.8-flash-high\` — Set Pro AGY model to Gemini 3.8 Flash High`,
+          `- \`/model claude-sonnet-4-6\` — Set Pro AGY model to Claude Sonnet 4.6`,
+          `- \`/model gemini-3.1-pro-high\` — Set Pro AGY model to Gemini 3.1 Pro High`,
+        ].join('\n');
+
+        callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: infoMsg });
+        return infoMsg;
+      }
+
+      if (lowerArg === 'pro') {
+        this.modelTier = 'pro';
+        callbacks.onStatusChange?.('pro', this.customAgyModel);
+        const switchMsg = `**Model switched to Pro (Default)**\n\nUsing **Antigravity CLI** with \`${this.customAgyModel}\` and auto-approved permissions (\`--dangerously-skip-permissions\`). Deep reasoning and multi-step terminal actions are active.`;
+        callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: switchMsg });
+        return switchMsg;
+      }
+
+      if (lowerArg === 'flash') {
+        this.modelTier = 'flash';
+        callbacks.onStatusChange?.('flash', 'gemini-flash-latest');
+        const keyNote = this.hasKey()
+          ? ''
+          : `\n\n*Note: No Gemini API Key is configured. Enter your key in Settings to use Flash mode.*`;
+        const switchMsg = `**Model switched to Flash**\n\nUsing **Google Gemini API** (\`gemini-flash-latest\`) for fast, lightweight remote operations.${keyNote}`;
+        callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: switchMsg });
+        return switchMsg;
+      }
+
+      // Setting a specific model name (e.g. /model gemini-3.8-flash-high, /model claude-sonnet-4-6, /model gemini-3.1-pro-high)
+      this.modelTier = 'pro';
+      this.customAgyModel = arg;
+      callbacks.onStatusChange?.('pro', this.customAgyModel);
+      const customMsg = `**Model switched to Pro with custom engine**\n\nActive model: \`${this.customAgyModel}\` via **Antigravity CLI** (\`--dangerously-skip-permissions\`). All subsequent requests and coding tasks will execute on this model.`;
+      callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: customMsg });
+      return customMsg;
+    }
+
+    // 2. Check for /usage command
+    if (trimmed === '/usage' || trimmed === '/stats' || trimmed.startsWith('/usage ')) {
+      const now = Date.now();
+      const uptimeSec = Math.floor((now - this.metrics.startTime) / 1000);
+      const hours = Math.floor(uptimeSec / 3600);
+      const minutes = Math.floor((uptimeSec % 3600) / 60);
+      const seconds = uptimeSec % 60;
+      const uptimeStr = `${hours > 0 ? `${hours}h ` : ''}${minutes}m ${seconds}s`;
+
+      const memUsage = process.memoryUsage();
+      const rssMb = (memUsage.rss / 1024 / 1024).toFixed(1);
+      const heapUsedMb = (memUsage.heapUsed / 1024 / 1024).toFixed(1);
+
+      const totalSysMem = (os.totalmem() / 1024 / 1024 / 1024).toFixed(1);
+      const freeSysMem = (os.freemem() / 1024 / 1024 / 1024).toFixed(1);
+
+      const isPro = this.modelTier === 'pro';
+      const engineName = isPro
+        ? `Pro (Antigravity CLI: ${this.customAgyModel})`
+        : `Flash (Google Gemini API)`;
+
+      const usageMsg = [
+        `### PocketBridge Usage & Runtime Telemetry\n`,
+        `- **Active AI Engine**: ${engineName}`,
+        `- **Session Uptime**: ${uptimeStr}`,
+        `- **Total Requests Handled**: ${this.metrics.totalRequests}`,
+        `\n**Execution Breakdown:**`,
+        `- Antigravity (AGY) Autonomous Tasks: **${this.metrics.agyTasks}**`,
+        `- Gemini API Direct Calls: **${this.metrics.geminiCalls}**`,
+        `- Desktop Screenshots & Camera Photos: **${this.metrics.screenshots}**`,
+        `- Shell & Terminal Commands: **${this.metrics.shellCommands}**`,
+        `- Telegram Messages & Voice Notes: **${this.metrics.telegramMessages}**`,
+        `\n**Quota & Engine Health:**`,
+        `- **Pro Mode (AGY)**: Unlimited / Free of Cloud API quota limits`,
+        `- **Flash Mode (API)**: ${this.hasKey() ? 'Configured & Operational' : 'No API key set in Settings'}`,
+        `- **Node Process Memory**: RSS ${rssMb} MB | Heap ${heapUsedMb} MB`,
+        `- **Mac System Memory**: ${freeSysMem} GB free / ${totalSysMem} GB total`,
+      ].join('\n');
+
+      callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: usageMsg });
+      return usageMsg;
+    }
+
+    // 3. Check for quick slash commands (for instant offline responses / shortcuts)
     if (trimmed.startsWith('/agy ') || trimmed.startsWith('/antigravity ')) {
       const cmdPrefix = trimmed.startsWith('/agy ') ? '/agy ' : '/antigravity ';
       const agyPrompt = trimmed.substring(cmdPrefix.length).trim();
@@ -274,10 +424,12 @@ export class PocketAgent {
         return msg;
       }
 
+      this.recordMetric('agyTasks');
+      const agyModel = this.customAgyModel;
       const logId = `term-${Date.now()}`;
       callbacks.onTerminalLog({
         id: logId,
-        command: `agy --model gemini-3.8-flash-high --dangerously-skip-permissions -p "${agyPrompt.replace(/"/g, '\\"')}"`,
+        command: `agy --model ${agyModel} --dangerously-skip-permissions -p "${agyPrompt.replace(/"/g, '\\"')}"`,
         output: '',
         status: 'running',
         timestamp: Date.now(),
@@ -285,16 +437,17 @@ export class PocketAgent {
 
       callbacks.onUpdateMessage(assistantMessageId, {
         status: 'thinking',
-        content: `**Delegating to Antigravity CLI (Gemini 3.8 Flash High)**...\n> "${agyPrompt}"\n\n*Running autonomously with \`--dangerously-skip-permissions\`...*`,
+        content: `**Delegating to Antigravity CLI (${agyModel})**...\n> "${agyPrompt}"\n\n*Running autonomously with \`--dangerously-skip-permissions\`...*`,
       });
 
       const res = await runAgyTask({
         prompt: agyPrompt,
+        model: agyModel,
         onChunk: (chunk) => callbacks.onTerminalChunk(logId, chunk),
       });
 
       callbacks.onTerminalChunk(logId, '', res.exitCode);
-      const msg = `**Antigravity Result** (Gemini 3.8 Flash High):\n\n${res.output}`;
+      const msg = `**Antigravity Result** (${agyModel}):\n\n${res.output}`;
       callbacks.onUpdateMessage(assistantMessageId, {
         status: res.exitCode === 0 ? 'done' : 'error',
         content: msg,
@@ -303,6 +456,7 @@ export class PocketAgent {
     }
 
     if (trimmed.startsWith('/screenshot')) {
+      this.recordMetric('screenshots');
       callbacks.onUpdateMessage(assistantMessageId, {
         status: 'thinking',
         content: 'Capturing Mac screen...',
@@ -318,6 +472,7 @@ export class PocketAgent {
     }
 
     if (trimmed.startsWith('/camera') || trimmed.startsWith('/photo')) {
+      this.recordMetric('screenshots');
       callbacks.onUpdateMessage(assistantMessageId, {
         status: 'thinking',
         content: 'Snapping photo from Mac FaceTime camera...',
@@ -333,6 +488,7 @@ export class PocketAgent {
     }
 
     if (trimmed.startsWith('/git')) {
+      this.recordMetric('shellCommands');
       const gitCmd = trimmed.replace(/^\/git\s*/, '') || 'status';
       const logId = `term-${Date.now()}`;
       callbacks.onTerminalLog({
@@ -354,6 +510,7 @@ export class PocketAgent {
     }
 
     if (trimmed.startsWith('/sh ')) {
+      this.recordMetric('shellCommands');
       const cmd = trimmed.substring(4);
       const logId = `term-${Date.now()}`;
       callbacks.onTerminalLog({
@@ -428,6 +585,7 @@ export class PocketAgent {
     }
 
     if (trimmed.startsWith('/tg ')) {
+      this.recordMetric('telegramMessages');
       const rest = trimmed.substring(4).trim();
       const firstSpace = rest.indexOf(' ');
       if (firstSpace === -1) {
@@ -468,6 +626,7 @@ export class PocketAgent {
     }
 
     if (trimmed.startsWith('/tgvoice ') || trimmed.startsWith('/voice ')) {
+      this.recordMetric('telegramMessages');
       const cmdPrefix = trimmed.startsWith('/tgvoice ') ? '/tgvoice ' : '/voice ';
       const rest = trimmed.substring(cmdPrefix.length).trim();
       const firstSpace = rest.indexOf(' ');
@@ -497,6 +656,7 @@ export class PocketAgent {
     }
 
     if (trimmed === '/system' || trimmed === '/sys') {
+      this.recordMetric('shellCommands');
       const res = await executeShellCommand('pmset -g batt; uptime');
       callbacks.onUpdateMessage(assistantMessageId, {
         status: 'done',
@@ -513,13 +673,15 @@ export class PocketAgent {
       return 'Chat cleared.';
     }
 
-    // 2. If Pro mode is active (default), execute directly via Antigravity Engine (Gemini 3.8 Flash High)
+    // 4. If Pro mode is active (default), execute directly via Antigravity Engine
     if (this.modelTier === 'pro') {
+      this.recordMetric('agyTasks');
       const logId = `term-${Date.now()}`;
       const continues = history.length > 0;
+      const modelName = this.customAgyModel;
       callbacks.onTerminalLog({
         id: logId,
-        command: `agy --model gemini-3.8-flash-high --dangerously-skip-permissions ${continues ? '-c ' : ''}-p "${trimmed.replace(/"/g, '\\"')}"`,
+        command: `agy --model ${modelName} --dangerously-skip-permissions ${continues ? '-c ' : ''}-p "${trimmed.replace(/"/g, '\\"')}"`,
         output: '',
         status: 'running',
         timestamp: Date.now(),
@@ -527,11 +689,12 @@ export class PocketAgent {
 
       callbacks.onUpdateMessage(assistantMessageId, {
         status: 'thinking',
-        content: 'Thinking with Antigravity (Gemini 3.8 Flash High)...',
+        content: `Thinking with Antigravity (${modelName})...`,
       });
 
       const res = await runAgyTask({
         prompt: trimmed,
+        model: modelName,
         continueSession: continues,
         onChunk: (chunk) => callbacks.onTerminalChunk(logId, chunk),
       });
@@ -554,10 +717,10 @@ export class PocketAgent {
       return res.output;
     }
 
-    // 3. Flash Mode: If no Gemini API Key is configured yet, guide the user
+    // 5. Flash Mode: If no Gemini API Key is configured yet, guide the user
     if (!this.hasKey()) {
       const msg =
-        "**PocketBridge is ready!**\n\nTo enable full autonomous AI actions (natural language tool execution, testing apps, web searches, and auto-screenshots), please enter your **Gemini API Key** in the **Settings** modal.\n\n*In the meantime, you can test immediate direct commands:*\n- `/screenshot` — Grab live desktop screenshot\n- `/open <app>` — Open any Mac app (e.g. /open Safari)\n- `/click <x> <y>` — Click coordinates on Mac screen\n- `/type <text>` — Type text into active window\n- `/key <key>` — Press key (enter, space, esc, tab)\n- `/hotkey <combo>` — Shortcut (e.g. /hotkey cmd+space)\n- `/git status` — Run git commands\n- `/sh <command>` — Run any terminal command directly";
+        "**PocketBridge is ready!**\n\nTo enable full autonomous AI actions (natural language tool execution, testing apps, web searches, and auto-screenshots), please enter your **Gemini API Key** in the **Settings** modal.\n\n*In the meantime, you can test immediate direct commands:*\n- `/screenshot` — Grab live desktop screenshot\n- `/open <app>` — Open any Mac app (e.g. /open Safari)\n- `/click <x> <y>` — Click coordinates on Mac screen\n- `/type <text>` — Type text into active window\n- `/key <key>` — Press key (enter, space, esc, tab)\n- `/hotkey <combo>` — Shortcut (e.g. /hotkey cmd+space)\n- `/git status` — Run git commands\n- `/sh <command>` — Run any terminal command directly\n- `/model` — Inspect or switch AI model\n- `/usage` — View session usage telemetry";
       callbacks.onUpdateMessage(assistantMessageId, {
         status: 'done',
         content: msg,
@@ -565,7 +728,8 @@ export class PocketAgent {
       return msg;
     }
 
-    // 3. Run Gemini 2.5 Flash with tool calling loop
+    // 6. Run Gemini Flash with tool calling loop
+    this.recordMetric('geminiCalls');
     callbacks.onUpdateMessage(assistantMessageId, {
       status: 'thinking',
       content: 'Thinking...',

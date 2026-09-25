@@ -194,7 +194,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   Pro (Default)
                 </span>
                 <span className="text-[10px] text-muted-foreground block mt-0.5 leading-snug">
-                  Gemini 3.8 Flash High via Antigravity (--dangerously-skip-permissions)
+                  {status?.activeModel || 'Gemini 3.8 Flash High'} via Antigravity (--dangerously-skip-permissions)
                 </span>
               </button>
 

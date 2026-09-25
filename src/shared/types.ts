@@ -51,11 +51,13 @@ export interface SystemStatus {
   hasTelegramConfig: boolean;
   pinRequired: boolean;
   modelTier: 'flash' | 'pro';
+  activeModel?: string;
 }
 
 export interface ConfigSettings {
   geminiApiKey?: string;
   modelTier?: 'flash' | 'pro';
+  activeModel?: string;
   accessPin?: string;
   telegramApiId?: string;
   telegramApiHash?: string;

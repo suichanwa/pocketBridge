@@ -187,6 +187,7 @@ async function getLiveSystemStatus(): Promise<SystemStatus> {
     hasTelegramConfig: Boolean(process.env.TELEGRAM_API_ID && process.env.TELEGRAM_API_HASH),
     pinRequired: Boolean(process.env.ACCESS_PIN && process.env.ACCESS_PIN.trim().length > 0),
     modelTier: agent.getModelTier(),
+    activeModel: agent.getActiveModel(),
   };
 }
 
@@ -316,6 +317,10 @@ async function startServer() {
       process.env.MODEL_TIER = body.modelTier;
       agent.setModelTier(body.modelTier);
     }
+    if (body.activeModel !== undefined) {
+      process.env.ACTIVE_MODEL = body.activeModel;
+      agent.setCustomAgyModel(body.activeModel);
+    }
     if (body.accessPin !== undefined) {
       process.env.ACCESS_PIN = body.accessPin;
     }
@@ -332,7 +337,8 @@ async function startServer() {
 PORT=${PORT}
 HOST=${HOST}
 GEMINI_API_KEY=${process.env.GEMINI_API_KEY || ''}
-MODEL_TIER=${process.env.MODEL_TIER || 'flash'}
+MODEL_TIER=${process.env.MODEL_TIER || 'pro'}
+ACTIVE_MODEL=${process.env.ACTIVE_MODEL || 'gemini-3.8-flash-high'}
 ACCESS_PIN=${process.env.ACCESS_PIN || ''}
 TELEGRAM_API_ID=${process.env.TELEGRAM_API_ID || ''}
 TELEGRAM_API_HASH=${process.env.TELEGRAM_API_HASH || ''}
@@ -477,6 +483,32 @@ TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
                 url,
                 timestamp: Date.now(),
               });
+            },
+            onStatusChange: async (tier, activeModel) => {
+              process.env.MODEL_TIER = tier;
+              process.env.ACTIVE_MODEL = activeModel;
+              try {
+                const envPath = path.resolve(process.cwd(), '.env');
+                let envContent = '';
+                try {
+                  envContent = await fs.readFile(envPath, 'utf-8');
+                } catch {}
+                const updateEnvKey = (key: string, val: string) => {
+                  const regex = new RegExp(`^${key}=.*$`, 'm');
+                  if (regex.test(envContent)) {
+                    envContent = envContent.replace(regex, `${key}=${val}`);
+                  } else {
+                    envContent += `\n${key}=${val}`;
+                  }
+                };
+                updateEnvKey('MODEL_TIER', tier);
+                updateEnvKey('ACTIVE_MODEL', activeModel);
+                await fs.writeFile(envPath, envContent.trim() + '\n', 'utf-8');
+              } catch (err) {
+                console.error('Error persisting model change to .env:', err);
+              }
+              const updatedStatus = await getLiveSystemStatus();
+              broadcast({ type: 'system_status', status: updatedStatus });
             },
           });
         } else if (clientMsg.type === 'run_quick_action') {

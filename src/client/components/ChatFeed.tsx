@@ -7,6 +7,8 @@ import {
   Send,
   Bot,
   User,
+  Brain,
+  Activity,
   Camera,
   Monitor,
   Terminal,
@@ -44,6 +46,16 @@ interface CommandOption {
 }
 
 const AVAILABLE_COMMANDS: CommandOption[] = [
+  {
+    name: '/model',
+    description: 'Inspect or switch active AI model (/model pro, /model flash, /model <name>)',
+    icon: Brain,
+  },
+  {
+    name: '/usage',
+    description: 'View session usage metrics, AI engine status, and Mac system utilization',
+    icon: Activity,
+  },
   {
     name: '/agy ',
     description: 'Run task via Antigravity (Gemini 3.8 Flash High, --dangerously-skip-permissions)',
@@ -189,7 +201,13 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
       setShowCommands(false);
       return;
     }
-    setInputText(cmdName);
+    if (cmdName.trim() === '/usage') {
+      onSendMessage('/usage');
+      setInputText('');
+      setShowCommands(false);
+      return;
+    }
+    setInputText(cmdName.endsWith(' ') ? cmdName : `${cmdName} `);
     setShowCommands(false);
     inputRef.current?.focus();
   };
