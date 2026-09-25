@@ -10,6 +10,7 @@ import os from 'node:os';
 import { execa } from 'execa';
 import { PocketAgent } from './agent.js';
 import { takeMacScreenshot } from './tools/screenshot.js';
+import { takeCameraPhoto } from './tools/camera.js';
 import { executeShellCommand } from './tools/shell.js';
 import type {
   ChatMessage,
@@ -205,6 +206,21 @@ async function startServer() {
     }
   });
 
+  app.post('/api/action/camera', async (req, reply) => {
+    try {
+      const photo = await takeCameraPhoto();
+      broadcast({
+        type: 'screenshot_ready',
+        url: photo.publicUrl,
+        timestamp: photo.timestamp,
+      });
+      return { success: true, url: photo.publicUrl };
+    } catch (err: any) {
+      reply.status(500);
+      return { success: false, error: err?.message };
+    }
+  });
+
   app.post('/api/settings', async (req, reply) => {
     const body = req.body as ConfigSettings;
     if (body.geminiApiKey !== undefined) {
@@ -367,6 +383,23 @@ TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
             };
             messages.push(shotMsg);
             broadcast({ type: 'chat_message', message: shotMsg });
+          } else if (clientMsg.action === 'camera') {
+            const photo = await takeCameraPhoto();
+            broadcast({
+              type: 'screenshot_ready',
+              url: photo.publicUrl,
+              timestamp: photo.timestamp,
+            });
+            const photoMsg: ChatMessage = {
+              id: `camera-${Date.now()}`,
+              role: 'assistant',
+              content: `📸 **Webcam photo captured** at ${new Date(photo.timestamp).toLocaleTimeString()}`,
+              screenshotUrl: photo.publicUrl,
+              timestamp: photo.timestamp,
+              status: 'done',
+            };
+            messages.push(photoMsg);
+            broadcast({ type: 'chat_message', message: photoMsg });
           } else if (clientMsg.action === 'git_status') {
             const logId = `term-${Date.now()}`;
             const log: TerminalLog = {

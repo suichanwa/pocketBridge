@@ -24,7 +24,7 @@ import type { ChatMessage, ToolCallRecord } from '../../shared/types.js';
 interface ChatFeedProps {
   messages: ChatMessage[];
   onSendMessage: (text: string) => void;
-  onQuickAction: (action: 'screenshot' | 'git_status' | 'system_info') => void;
+  onQuickAction: (action: 'screenshot' | 'camera' | 'git_status' | 'system_info') => void;
   onViewImage?: (url: string) => void;
   disabled?: boolean;
 }

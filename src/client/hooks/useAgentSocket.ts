@@ -166,7 +166,7 @@ export function useAgentSocket() {
     }
   }, []);
 
-  const sendQuickAction = useCallback((action: 'screenshot' | 'git_status' | 'system_info' | 'kill_apps') => {
+  const sendQuickAction = useCallback((action: 'screenshot' | 'camera' | 'git_status' | 'system_info' | 'kill_apps') => {
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(
         JSON.stringify({

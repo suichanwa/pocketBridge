@@ -1,9 +1,9 @@
 import React from 'react';
 import { Button } from '@/components/ui/button.js';
-import { Camera, GitBranch, Cpu, RefreshCw } from 'lucide-react';
+import { Camera, GitBranch, Cpu, Video } from 'lucide-react';
 
 interface QuickActionsProps {
-  onAction: (action: 'screenshot' | 'git_status' | 'system_info') => void;
+  onAction: (action: 'screenshot' | 'camera' | 'git_status' | 'system_info') => void;
   disabled?: boolean;
 }
 
@@ -19,6 +19,17 @@ export const QuickActions: React.FC<QuickActionsProps> = ({ onAction, disabled }
       >
         <Camera className="w-3.5 h-3.5 text-sky-400" />
         <span>Snap Screen</span>
+      </Button>
+
+      <Button
+        variant="secondary"
+        size="sm"
+        disabled={disabled}
+        onClick={() => onAction('camera')}
+        className="h-7 text-xs px-2.5 rounded-full shrink-0 border border-border/40 hover:border-primary/50 gap-1.5 bg-secondary/60 hover:bg-secondary"
+      >
+        <Video className="w-3.5 h-3.5 text-violet-400" />
+        <span>Webcam</span>
       </Button>
 
       <Button

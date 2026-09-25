@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import { takeMacScreenshot } from './tools/screenshot.js';
+import { takeCameraPhoto } from './tools/camera.js';
 import { executeShellCommand } from './tools/shell.js';
 import { searchWeb } from './tools/search.js';
 import { sendTelegramMessage } from './tools/telegram.js';
@@ -25,6 +26,14 @@ const agentToolDeclarations = [
           description: 'If true, captures the active frontmost window instead of the entire screen.',
         },
       },
+    },
+  },
+  {
+    name: 'take_camera_photo',
+    description: "Snaps a real photo using the Mac's FaceTime HD / webcam camera so the user can see what is in front of the laptop.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {},
     },
   },
   {
@@ -119,6 +128,21 @@ export class PocketAgent {
         screenshotUrl: shot.publicUrl,
       });
       return `Captured Mac screen: ${shot.publicUrl}`;
+    }
+
+    if (trimmed.startsWith('/camera') || trimmed.startsWith('/photo')) {
+      callbacks.onUpdateMessage(assistantMessageId, {
+        status: 'thinking',
+        content: 'Snapping photo from Mac FaceTime camera...',
+      });
+      const photo = await takeCameraPhoto();
+      callbacks.onScreenshotReady(photo.publicUrl);
+      callbacks.onUpdateMessage(assistantMessageId, {
+        status: 'done',
+        content: `📸 **Captured photo from Mac camera** at ${new Date(photo.timestamp).toLocaleTimeString()}:`,
+        screenshotUrl: photo.publicUrl,
+      });
+      return `Captured photo from Mac camera: ${photo.publicUrl}`;
     }
 
     if (trimmed.startsWith('/git')) {
@@ -299,6 +323,16 @@ Guidelines:
                 message: 'Screenshot captured successfully',
                 url: shot.publicUrl,
                 timestamp: shot.timestamp,
+              };
+            } else if (call.name === 'take_camera_photo') {
+              const photo = await takeCameraPhoto();
+              latestScreenshotUrl = photo.publicUrl;
+              callbacks.onScreenshotReady(photo.publicUrl);
+              functionResult = {
+                status: 'success',
+                message: 'Camera photo snapped successfully',
+                url: photo.publicUrl,
+                timestamp: photo.timestamp,
               };
             } else if (call.name === 'execute_command') {
               const cmd = String(call.args?.command || '');
