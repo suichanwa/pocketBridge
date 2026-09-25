@@ -215,7 +215,7 @@ export class PocketAgent {
 
     try {
       const ai = new GoogleGenAI({ apiKey: this.apiKey });
-      const model = 'gemini-2.5-flash';
+      const model = 'gemini-flash-latest';
 
       // Build conversation contents for Gemini
       const conversationContents: any[] = [];
@@ -258,6 +258,32 @@ Guidelines:
 4. Execute tests and check exit codes carefully.
 `;
 
+      const candidateModels = ['gemini-flash-latest', 'gemini-3.7-flash', 'gemini-3.8-flash'];
+
+      const generateWithFallback = async (contents: any[]) => {
+        let lastErr: any = null;
+        for (const m of candidateModels) {
+          try {
+            return await ai.models.generateContent({
+              model: m,
+              contents,
+              config: {
+                systemInstruction,
+                tools: [{ functionDeclarations: agentToolDeclarations as any }],
+              },
+            });
+          } catch (err: any) {
+            lastErr = err;
+            if (err?.status === 503 || err?.status === 429 || err?.status === 404) {
+              console.warn(`Model ${m} returned ${err.status}, trying fallback model...`);
+              continue;
+            }
+            throw err;
+          }
+        }
+        throw lastErr;
+      };
+
       const toolRecords: ToolCallRecord[] = [];
       let latestScreenshotUrl: string | undefined = undefined;
 
@@ -268,14 +294,7 @@ Guidelines:
       while (currentIteration < MAX_ITERATIONS) {
         currentIteration++;
 
-        const response = await ai.models.generateContent({
-          model,
-          contents: conversationContents,
-          config: {
-            systemInstruction,
-            tools: [{ functionDeclarations: agentToolDeclarations as any }],
-          },
-        });
+        const response = await generateWithFallback(conversationContents);
 
         const candidate = response.candidates?.[0];
         const functionCalls = candidate?.content?.parts?.filter(
