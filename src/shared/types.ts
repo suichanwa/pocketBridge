@@ -63,16 +63,37 @@ export interface ConfigSettings {
   telegramApiHash?: string;
 }
 
+export interface ChatSessionMeta {
+  id: string;
+  title: string;
+  preview?: string;
+  createdAt: number;
+  updatedAt: number;
+  messageCount: number;
+  isExternalAgy?: boolean;
+  agyConversationId?: string;
+}
+
+export interface ChatSession extends ChatSessionMeta {
+  messages: ChatMessage[];
+  terminalLogs: TerminalLog[];
+}
+
 export type ClientMessage =
   | { type: 'chat_send'; text: string; pin?: string }
   | { type: 'chat_clear'; pin?: string }
   | { type: 'run_quick_action'; action: 'screenshot' | 'camera' | 'git_status' | 'system_info' | 'kill_apps'; pin?: string }
   | { type: 'save_settings'; settings: ConfigSettings; pin?: string }
   | { type: 'verify_pin'; pin: string }
-  | { type: 'get_status' };
+  | { type: 'get_status' }
+  | { type: 'get_sessions'; pin?: string }
+  | { type: 'switch_session'; sessionId: string; pin?: string }
+  | { type: 'new_session'; title?: string; pin?: string }
+  | { type: 'delete_session'; sessionId: string; pin?: string }
+  | { type: 'resume_agy_session'; conversationId: string; pin?: string };
 
 export type ServerMessage =
-  | { type: 'init_state'; messages: ChatMessage[]; terminalLogs: TerminalLog[]; status: SystemStatus }
+  | { type: 'init_state'; messages: ChatMessage[]; terminalLogs: TerminalLog[]; status: SystemStatus; sessions?: ChatSessionMeta[]; agySessions?: ChatSessionMeta[]; activeSessionId?: string }
   | { type: 'chat_message'; message: ChatMessage }
   | { type: 'chat_update'; messageId: string; partial: Partial<ChatMessage> }
   | { type: 'chat_cleared' }
@@ -81,4 +102,6 @@ export type ServerMessage =
   | { type: 'system_status'; status: SystemStatus }
   | { type: 'auth_result'; success: boolean; message?: string }
   | { type: 'screenshot_ready'; url: string; timestamp: number }
+  | { type: 'sessions_list'; sessions: ChatSessionMeta[]; agySessions: ChatSessionMeta[]; activeSessionId: string }
+  | { type: 'session_loaded'; session: ChatSession; sessions?: ChatSessionMeta[]; agySessions?: ChatSessionMeta[] }
   | { type: 'error'; message: string };

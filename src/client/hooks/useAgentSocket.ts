@@ -6,6 +6,7 @@ import type {
   ClientMessage,
   ServerMessage,
   ConfigSettings,
+  ChatSessionMeta,
 } from '../../shared/types.js';
 
 export function useAgentSocket() {
@@ -16,6 +17,9 @@ export function useAgentSocket() {
   const [latestScreenshot, setLatestScreenshot] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<ChatSessionMeta[]>([]);
+  const [agySessions, setAgySessions] = useState<ChatSessionMeta[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<any>(null);
@@ -49,6 +53,9 @@ export function useAgentSocket() {
             setMessages(msg.messages);
             setTerminalLogs(msg.terminalLogs);
             setStatus(msg.status);
+            if (msg.sessions) setSessions(msg.sessions);
+            if (msg.agySessions) setAgySessions(msg.agySessions);
+            if (msg.activeSessionId) setActiveSessionId(msg.activeSessionId);
             if (msg.status.pinRequired && !savedPinRef.current) {
               setIsAuthenticated(false);
             }
@@ -56,6 +63,24 @@ export function useAgentSocket() {
             const lastShot = [...msg.messages].reverse().find((m) => m.screenshotUrl);
             if (lastShot?.screenshotUrl) {
               setLatestScreenshot(lastShot.screenshotUrl);
+            }
+            break;
+
+          case 'sessions_list':
+            setSessions(msg.sessions);
+            setAgySessions(msg.agySessions);
+            setActiveSessionId(msg.activeSessionId);
+            break;
+
+          case 'session_loaded':
+            setMessages(msg.session.messages);
+            setTerminalLogs(msg.session.terminalLogs || []);
+            setActiveSessionId(msg.session.id);
+            if (msg.sessions) setSessions(msg.sessions);
+            if (msg.agySessions) setAgySessions(msg.agySessions);
+            const shotInLoaded = [...msg.session.messages].reverse().find((m) => m.screenshotUrl);
+            if (shotInLoaded?.screenshotUrl) {
+              setLatestScreenshot(shotInLoaded.screenshotUrl);
             }
             break;
 
@@ -233,6 +258,65 @@ export function useAgentSocket() {
     }
   }, []);
 
+  const refreshSessions = useCallback(() => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(
+        JSON.stringify({
+          type: 'get_sessions',
+          pin: savedPinRef.current,
+        } as ClientMessage)
+      );
+    }
+  }, []);
+
+  const switchSession = useCallback((sessionId: string) => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(
+        JSON.stringify({
+          type: 'switch_session',
+          sessionId,
+          pin: savedPinRef.current,
+        } as ClientMessage)
+      );
+    }
+  }, []);
+
+  const createNewSession = useCallback((title?: string) => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(
+        JSON.stringify({
+          type: 'new_session',
+          title,
+          pin: savedPinRef.current,
+        } as ClientMessage)
+      );
+    }
+  }, []);
+
+  const deleteSession = useCallback((sessionId: string) => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(
+        JSON.stringify({
+          type: 'delete_session',
+          sessionId,
+          pin: savedPinRef.current,
+        } as ClientMessage)
+      );
+    }
+  }, []);
+
+  const resumeAgySession = useCallback((conversationId: string) => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(
+        JSON.stringify({
+          type: 'resume_agy_session',
+          conversationId,
+          pin: savedPinRef.current,
+        } as ClientMessage)
+      );
+    }
+  }, []);
+
   return {
     isConnected,
     messages,
@@ -241,10 +325,18 @@ export function useAgentSocket() {
     latestScreenshot,
     isAuthenticated,
     authError,
+    sessions,
+    agySessions,
+    activeSessionId,
     sendMessage,
     clearChat,
     sendQuickAction,
     saveSettings,
     verifyPin,
+    refreshSessions,
+    switchSession,
+    createNewSession,
+    deleteSession,
+    resumeAgySession,
   };
 }

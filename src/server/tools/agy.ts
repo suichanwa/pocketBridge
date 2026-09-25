@@ -7,6 +7,7 @@ export interface AgyTaskOptions {
   cwd?: string;
   timeoutMs?: number;
   continueSession?: boolean;
+  conversationId?: string;
   onChunk?: (chunk: string) => void;
 }
 
@@ -35,7 +36,9 @@ export async function runAgyTask(options: AgyTaskOptions): Promise<AgyTaskResult
     '--dangerously-skip-permissions',
   ];
 
-  if (options.continueSession) {
+  if (options.conversationId) {
+    args.push('--conversation', options.conversationId);
+  } else if (options.continueSession) {
     args.push('-c');
   }
 

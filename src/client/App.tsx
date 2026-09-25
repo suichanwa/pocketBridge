@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAgentSocket } from '@/hooks/useAgentSocket.js';
 import { Header } from '@/components/Header.js';
+import { ChatSidebar } from '@/components/ChatSidebar.js';
 import { ChatFeed } from '@/components/ChatFeed.js';
 import { ScreenViewer } from '@/components/ScreenViewer.js';
 import { TerminalLog } from '@/components/TerminalLog.js';
@@ -29,17 +30,38 @@ export function App() {
     latestScreenshot,
     isAuthenticated,
     authError,
+    sessions,
+    agySessions,
+    activeSessionId,
     sendMessage,
     clearChat,
     sendQuickAction,
     saveSettings,
     verifyPin,
+    refreshSessions,
+    switchSession,
+    createNewSession,
+    deleteSession,
+    resumeAgySession,
   } = useAgentSocket();
 
   const [activeTab, setActiveTab] = useState<'chat' | 'screen' | 'terminal'>('chat');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [isCapturing, setIsCapturing] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('pocketbridge_sidebar_open');
+      if (saved !== null) return JSON.parse(saved);
+    } catch {}
+    return typeof window !== 'undefined' ? window.innerWidth >= 1280 : false;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('pocketbridge_sidebar_open', JSON.stringify(sidebarOpen));
+    } catch {}
+  }, [sidebarOpen]);
 
   // Panel Visibility (persisted)
   const [panels, setPanels] = useState<{ chat: boolean; screen: boolean; terminal: boolean }>(() => {
@@ -250,17 +272,45 @@ export function App() {
         isConnected={isConnected}
         onOpenSettings={() => setSettingsOpen(true)}
         onClearChat={clearChat}
+        onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+        isSidebarOpen={sidebarOpen}
         panels={panels}
         onTogglePanel={togglePanel}
       />
 
-      {/* Mobile Layout (< 1024px) */}
-      <div className="lg:hidden flex flex-col flex-1 overflow-hidden">
-        <Tabs
-          value={activeTab}
-          onValueChange={(v) => setActiveTab(v as any)}
-          className="flex flex-col flex-1 overflow-hidden"
-        >
+      {/* Main Workspace with ChatSidebar */}
+      <div className="flex flex-1 overflow-hidden relative">
+        <ChatSidebar
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+          sessions={sessions}
+          agySessions={agySessions}
+          activeSessionId={activeSessionId}
+          onSwitchSession={(id) => {
+            switchSession(id);
+            if (typeof window !== 'undefined' && window.innerWidth < 1024) setSidebarOpen(false);
+          }}
+          onNewSession={() => {
+            createNewSession();
+            if (typeof window !== 'undefined' && window.innerWidth < 1024) setSidebarOpen(false);
+          }}
+          onDeleteSession={(id) => deleteSession(id)}
+          onResumeAgySession={(id) => {
+            resumeAgySession(id);
+            if (typeof window !== 'undefined' && window.innerWidth < 1024) setSidebarOpen(false);
+          }}
+          onRefreshSessions={refreshSessions}
+        />
+
+        {/* Workspace Columns Container */}
+        <div className="flex flex-col flex-1 overflow-hidden">
+          {/* Mobile Layout (< 1024px) */}
+          <div className="lg:hidden flex flex-col flex-1 overflow-hidden">
+            <Tabs
+              value={activeTab}
+              onValueChange={(v) => setActiveTab(v as any)}
+              className="flex flex-col flex-1 overflow-hidden"
+            >
           <div className="px-3 pt-2 pb-1 border-b border-border/40 bg-background/50">
             <TabsList className="grid grid-cols-3 w-full h-9">
               <TabsTrigger value="chat" className="text-xs gap-1.5">
@@ -490,6 +540,8 @@ export function App() {
             )}
           </div>
         )}
+      </div>
+        </div>
       </div>
 
       {/* Settings Modal */}

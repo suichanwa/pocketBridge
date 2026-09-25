@@ -9,3 +9,5 @@ captures/*
 test-output/
 certs/
 bin/
+sessions/*
+!sessions/.gitkeep

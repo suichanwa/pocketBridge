@@ -19,7 +19,18 @@ import type {
   ClientMessage,
   ServerMessage,
   ConfigSettings,
+  ChatSession,
 } from '../shared/types.js';
+import {
+  ensureSessionsDir,
+  listPocketSessions,
+  loadPocketSession,
+  savePocketSession,
+  createPocketSession,
+  deletePocketSession,
+  listLocalAgySessions,
+  importOrResumeAgySession,
+} from './sessions.js';
 
 // Load .env
 dotenv.config();
@@ -32,18 +43,26 @@ const CLIENT_DIST_DIR = path.resolve(process.cwd(), 'dist/client');
 // Initialize PocketAgent
 const agent = new PocketAgent(process.env.GEMINI_API_KEY);
 
-// In-Memory state
-const messages: ChatMessage[] = [
-  {
-    id: 'welcome-1',
-    role: 'assistant',
-    content:
-      "**Welcome to PocketBridge!**\n\nI am your Mac's autonomous AI bridge. From your phone or remote browser, you can command me to:\n- **Take screenshots** and inspect running apps\n- **Run shell commands & tests** (`git`, `npm test`, `pytest`)\n- **Search Google / the web** for docs and answers\n- **Send Telegram messages**\n\nTap a quick action below or type a request!",
-    timestamp: Date.now(),
-    status: 'done',
-  },
-];
-const terminalLogs: TerminalLog[] = [];
+// Active Chat Session state (persisted to disk in sessions/)
+let activeSession: ChatSession = {
+  id: 'pb-default',
+  title: 'Default Conversation',
+  preview: 'Ready for commands',
+  createdAt: Date.now(),
+  updatedAt: Date.now(),
+  messageCount: 1,
+  messages: [
+    {
+      id: 'welcome-1',
+      role: 'assistant',
+      content:
+        "**Welcome to PocketBridge!**\n\nI am your Mac's autonomous AI bridge. From your phone or remote browser, you can command me to:\n- **Take screenshots** and inspect running apps\n- **Run shell commands & tests** (`git`, `npm test`, `pytest`)\n- **Search Google / the web** for docs and answers\n- **Send Telegram messages**\n\nTap a quick action below or type a request!",
+      timestamp: Date.now(),
+      status: 'done',
+    },
+  ],
+  terminalLogs: [],
+};
 const connectedClients = new Set<any>();
 
 /**
@@ -193,6 +212,24 @@ async function getLiveSystemStatus(): Promise<SystemStatus> {
 
 async function startServer() {
   await fs.mkdir(CAPTURES_DIR, { recursive: true });
+  await ensureSessionsDir();
+
+  // Load latest active session or create initial session
+  try {
+    const existing = await listPocketSessions();
+    if (existing.length > 0) {
+      const loaded = await loadPocketSession(existing[0].id);
+      if (loaded) {
+        activeSession = loaded;
+      } else {
+        activeSession = await createPocketSession();
+      }
+    } else {
+      activeSession = await createPocketSession();
+    }
+  } catch (err) {
+    console.error('Error initializing active session:', err);
+  }
 
   const app = Fastify({
     logger: false,
@@ -274,6 +311,82 @@ async function startServer() {
     } catch (err: any) {
       reply.status(500);
       return { success: false, error: err?.message };
+    }
+  });
+
+  // Chat Session Routes
+  app.get('/api/sessions', async () => {
+    const sessions = await listPocketSessions();
+    const agySessions = await listLocalAgySessions();
+    return {
+      sessions,
+      agySessions,
+      activeSessionId: activeSession.id,
+    };
+  });
+
+  app.get('/api/sessions/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const session = await loadPocketSession(id);
+    if (!session) {
+      reply.status(404);
+      return { error: 'Session not found' };
+    }
+    return { session };
+  });
+
+  app.post('/api/sessions', async (req) => {
+    const body = (req.body as { title?: string } | undefined) || {};
+    activeSession = await createPocketSession(body.title);
+    const sessions = await listPocketSessions();
+    const agySessions = await listLocalAgySessions();
+    broadcast({
+      type: 'session_loaded',
+      session: activeSession,
+      sessions,
+      agySessions,
+    });
+    return { session: activeSession };
+  });
+
+  app.delete('/api/sessions/:id', async (req) => {
+    const { id } = req.params as { id: string };
+    await deletePocketSession(id);
+    if (activeSession.id === id) {
+      const remaining = await listPocketSessions();
+      if (remaining.length > 0) {
+        activeSession = (await loadPocketSession(remaining[0].id)) || (await createPocketSession());
+      } else {
+        activeSession = await createPocketSession();
+      }
+    }
+    const sessions = await listPocketSessions();
+    const agySessions = await listLocalAgySessions();
+    broadcast({
+      type: 'session_loaded',
+      session: activeSession,
+      sessions,
+      agySessions,
+    });
+    return { success: true };
+  });
+
+  app.post('/api/sessions/resume-agy/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    try {
+      activeSession = await importOrResumeAgySession(id);
+      const sessions = await listPocketSessions();
+      const agySessions = await listLocalAgySessions();
+      broadcast({
+        type: 'session_loaded',
+        session: activeSession,
+        sessions,
+        agySessions,
+      });
+      return { session: activeSession };
+    } catch (err: any) {
+      reply.status(500);
+      return { error: err?.message };
     }
   });
 
@@ -360,11 +473,16 @@ TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
 
     // Send initial state on connection
     const currentStatus = await getLiveSystemStatus();
+    const sessions = await listPocketSessions();
+    const agySessions = await listLocalAgySessions();
     const initMsg: ServerMessage = {
       type: 'init_state',
-      messages,
-      terminalLogs: terminalLogs.slice(-20),
+      messages: activeSession.messages,
+      terminalLogs: (activeSession.terminalLogs || []).slice(-20),
       status: currentStatus,
+      sessions,
+      agySessions,
+      activeSessionId: activeSession.id,
     };
     socket.send(JSON.stringify(initMsg));
 
@@ -398,8 +516,96 @@ TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
           }
         }
 
+        if (clientMsg.type === 'get_sessions') {
+          const sessions = await listPocketSessions();
+          const agySessions = await listLocalAgySessions();
+          socket.send(
+            JSON.stringify({
+              type: 'sessions_list',
+              sessions,
+              agySessions,
+              activeSessionId: activeSession.id,
+            } as ServerMessage)
+          );
+          return;
+        }
+
+        if (clientMsg.type === 'switch_session') {
+          const loaded = await loadPocketSession(clientMsg.sessionId);
+          if (loaded) {
+            activeSession = loaded;
+            const sessions = await listPocketSessions();
+            const agySessions = await listLocalAgySessions();
+            broadcast({
+              type: 'session_loaded',
+              session: activeSession,
+              sessions,
+              agySessions,
+            });
+          }
+          return;
+        }
+
+        if (clientMsg.type === 'new_session') {
+          activeSession = await createPocketSession(clientMsg.title || 'New Conversation');
+          const sessions = await listPocketSessions();
+          const agySessions = await listLocalAgySessions();
+          broadcast({
+            type: 'session_loaded',
+            session: activeSession,
+            sessions,
+            agySessions,
+          });
+          return;
+        }
+
+        if (clientMsg.type === 'delete_session') {
+          await deletePocketSession(clientMsg.sessionId);
+          if (activeSession.id === clientMsg.sessionId) {
+            const remaining = await listPocketSessions();
+            if (remaining.length > 0) {
+              activeSession = (await loadPocketSession(remaining[0].id)) || (await createPocketSession());
+            } else {
+              activeSession = await createPocketSession();
+            }
+          }
+          const sessions = await listPocketSessions();
+          const agySessions = await listLocalAgySessions();
+          broadcast({
+            type: 'session_loaded',
+            session: activeSession,
+            sessions,
+            agySessions,
+          });
+          return;
+        }
+
+        if (clientMsg.type === 'resume_agy_session') {
+          try {
+            activeSession = await importOrResumeAgySession(clientMsg.conversationId);
+            const sessions = await listPocketSessions();
+            const agySessions = await listLocalAgySessions();
+            broadcast({
+              type: 'session_loaded',
+              session: activeSession,
+              sessions,
+              agySessions,
+            });
+          } catch (err: any) {
+            socket.send(
+              JSON.stringify({
+                type: 'error',
+                message: err?.message || 'Failed to resume local AGY session',
+              } as ServerMessage)
+            );
+          }
+          return;
+        }
+
         if (clientMsg.type === 'chat_clear') {
-          messages.length = 0;
+          activeSession.messages = [];
+          activeSession.terminalLogs = [];
+          await savePocketSession(activeSession);
           broadcast({ type: 'chat_cleared' });
           return;
         }
@@ -417,7 +623,9 @@ TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
             lower === '/reset' ||
             lower.startsWith('/clear ')
           ) {
-            messages.length = 0;
+            activeSession.messages = [];
+            activeSession.terminalLogs = [];
+            await savePocketSession(activeSession);
             broadcast({ type: 'chat_cleared' });
             return;
           }
@@ -434,7 +642,7 @@ TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
             timestamp: Date.now(),
             status: 'done',
           };
-          messages.push(userMsg);
+          activeSession.messages.push(userMsg);
           broadcast({ type: 'chat_message', message: userMsg });
 
           const assistantMsg: ChatMessage = {
@@ -444,73 +652,89 @@ TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
             timestamp: Date.now(),
             status: 'thinking',
           };
-          messages.push(assistantMsg);
+          activeSession.messages.push(assistantMsg);
           broadcast({ type: 'chat_message', message: assistantMsg });
+          savePocketSession(activeSession).catch(console.error);
 
           // Run Agent asynchronously
-          agent.handleUserMessage(userText, messages, assistantMsgId, {
-            onUpdateMessage: (msgId, partial) => {
-              const target = messages.find((m) => m.id === msgId);
-              if (target) {
-                Object.assign(target, partial);
-              }
-              broadcast({ type: 'chat_update', messageId: msgId, partial });
-            },
-            onTerminalLog: (log) => {
-              terminalLogs.push(log);
-              broadcast({ type: 'terminal_log', log });
-            },
-            onTerminalChunk: (logId, chunk, exitCode) => {
-              const log = terminalLogs.find((l) => l.id === logId);
-              if (log) {
-                log.output += chunk;
-                if (exitCode !== undefined) {
-                  log.exitCode = exitCode;
-                  log.status = exitCode === 0 ? 'completed' : 'failed';
+          agent.handleUserMessage(
+            userText,
+            activeSession.messages,
+            assistantMsgId,
+            {
+              onUpdateMessage: (msgId, partial) => {
+                const target = activeSession.messages.find((m) => m.id === msgId);
+                if (target) {
+                  Object.assign(target, partial);
                 }
-              }
-              broadcast({
-                type: 'terminal_log_update',
-                logId,
-                chunk,
-                exitCode,
-                status: exitCode !== undefined ? (exitCode === 0 ? 'completed' : 'failed') : undefined,
-              });
-            },
-            onScreenshotReady: (url) => {
-              broadcast({
-                type: 'screenshot_ready',
-                url,
-                timestamp: Date.now(),
-              });
-            },
-            onStatusChange: async (tier, activeModel) => {
-              process.env.MODEL_TIER = tier;
-              process.env.ACTIVE_MODEL = activeModel;
-              try {
-                const envPath = path.resolve(process.cwd(), '.env');
-                let envContent = '';
-                try {
-                  envContent = await fs.readFile(envPath, 'utf-8');
-                } catch {}
-                const updateEnvKey = (key: string, val: string) => {
-                  const regex = new RegExp(`^${key}=.*$`, 'm');
-                  if (regex.test(envContent)) {
-                    envContent = envContent.replace(regex, `${key}=${val}`);
-                  } else {
-                    envContent += `\n${key}=${val}`;
+                broadcast({ type: 'chat_update', messageId: msgId, partial });
+                if (partial.status === 'done' || partial.status === 'error') {
+                  savePocketSession(activeSession).catch(console.error);
+                }
+              },
+              onTerminalLog: (log) => {
+                activeSession.terminalLogs = activeSession.terminalLogs || [];
+                activeSession.terminalLogs.push(log);
+                broadcast({ type: 'terminal_log', log });
+                savePocketSession(activeSession).catch(console.error);
+              },
+              onTerminalChunk: (logId, chunk, exitCode) => {
+                activeSession.terminalLogs = activeSession.terminalLogs || [];
+                const log = activeSession.terminalLogs.find((l) => l.id === logId);
+                if (log) {
+                  log.output += chunk;
+                  if (exitCode !== undefined) {
+                    log.exitCode = exitCode;
+                    log.status = exitCode === 0 ? 'completed' : 'failed';
                   }
-                };
-                updateEnvKey('MODEL_TIER', tier);
-                updateEnvKey('ACTIVE_MODEL', activeModel);
-                await fs.writeFile(envPath, envContent.trim() + '\n', 'utf-8');
-              } catch (err) {
-                console.error('Error persisting model change to .env:', err);
-              }
-              const updatedStatus = await getLiveSystemStatus();
-              broadcast({ type: 'system_status', status: updatedStatus });
+                }
+                broadcast({
+                  type: 'terminal_log_update',
+                  logId,
+                  chunk,
+                  exitCode,
+                  status: exitCode !== undefined ? (exitCode === 0 ? 'completed' : 'failed') : undefined,
+                });
+                if (exitCode !== undefined) {
+                  savePocketSession(activeSession).catch(console.error);
+                }
+              },
+              onScreenshotReady: (url) => {
+                broadcast({
+                  type: 'screenshot_ready',
+                  url,
+                  timestamp: Date.now(),
+                });
+              },
+              onStatusChange: async (tier, activeModel) => {
+                process.env.MODEL_TIER = tier;
+                process.env.ACTIVE_MODEL = activeModel;
+                try {
+                  const envPath = path.resolve(process.cwd(), '.env');
+                  let envContent = '';
+                  try {
+                    envContent = await fs.readFile(envPath, 'utf-8');
+                  } catch {}
+                  const updateEnvKey = (key: string, val: string) => {
+                    const regex = new RegExp(`^${key}=.*$`, 'm');
+                    if (regex.test(envContent)) {
+                      envContent = envContent.replace(regex, `${key}=${val}`);
+                    } else {
+                      envContent += `\n${key}=${val}`;
+                    }
+                  };
+                  updateEnvKey('MODEL_TIER', tier);
+                  updateEnvKey('ACTIVE_MODEL', activeModel);
+                  await fs.writeFile(envPath, envContent.trim() + '\n', 'utf-8');
+                } catch (err) {
+                  console.error('Error persisting model change to .env:', err);
+                }
+                const updatedStatus = await getLiveSystemStatus();
+                broadcast({ type: 'system_status', status: updatedStatus });
+              },
             },
-          });
+            activeSession.agyConversationId
+          );
         } else if (clientMsg.type === 'run_quick_action') {
           if (clientMsg.action === 'screenshot') {
             const shot = await takeMacScreenshot();
@@ -527,7 +751,8 @@ TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
               timestamp: shot.timestamp,
               status: 'done',
             };
-            messages.push(shotMsg);
+            activeSession.messages.push(shotMsg);
+            savePocketSession(activeSession).catch(console.error);
             broadcast({ type: 'chat_message', message: shotMsg });
           } else if (clientMsg.action === 'camera') {
             const photo = await takeCameraPhoto();
@@ -544,7 +769,8 @@ TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
               timestamp: photo.timestamp,
               status: 'done',
             };
-            messages.push(photoMsg);
+            activeSession.messages.push(photoMsg);
+            savePocketSession(activeSession).catch(console.error);
             broadcast({ type: 'chat_message', message: photoMsg });
           } else if (clientMsg.action === 'git_status') {
             const logId = `term-${Date.now()}`;
@@ -555,7 +781,8 @@ TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
               status: 'running',
               timestamp: Date.now(),
             };
-            terminalLogs.push(log);
+            activeSession.terminalLogs = activeSession.terminalLogs || [];
+            activeSession.terminalLogs.push(log);
             broadcast({ type: 'terminal_log', log });
 
             const res = await executeShellCommand('git status -s', {
@@ -582,7 +809,8 @@ TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
               timestamp: Date.now(),
               status: 'done',
             };
-            messages.push(gitMsg);
+            activeSession.messages.push(gitMsg);
+            savePocketSession(activeSession).catch(console.error);
             broadcast({ type: 'chat_message', message: gitMsg });
           } else if (clientMsg.action === 'system_info') {
             const status = await getLiveSystemStatus();
@@ -593,7 +821,8 @@ TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
               timestamp: Date.now(),
               status: 'done',
             };
-            messages.push(sysMsg);
+            activeSession.messages.push(sysMsg);
+            savePocketSession(activeSession).catch(console.error);
             broadcast({ type: 'chat_message', message: sysMsg });
           }
         } else if (clientMsg.type === 'get_status') {

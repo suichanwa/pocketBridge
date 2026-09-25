@@ -306,7 +306,8 @@ export class PocketAgent {
     userText: string,
     history: ChatMessage[],
     assistantMessageId: string,
-    callbacks: AgentCallbacks
+    callbacks: AgentCallbacks,
+    agyConversationId?: string
   ): Promise<string> {
     const trimmed = userText.trim();
 
@@ -679,9 +680,13 @@ export class PocketAgent {
       const logId = `term-${Date.now()}`;
       const continues = history.length > 0;
       const modelName = this.customAgyModel;
+      const resumeFlag = agyConversationId
+        ? `--conversation ${agyConversationId} `
+        : (continues ? '-c ' : '');
+
       callbacks.onTerminalLog({
         id: logId,
-        command: `agy --model ${modelName} --dangerously-skip-permissions ${continues ? '-c ' : ''}-p "${trimmed.replace(/"/g, '\\"')}"`,
+        command: `agy --model ${modelName} --dangerously-skip-permissions ${resumeFlag}-p "${trimmed.replace(/"/g, '\\"')}"`,
         output: '',
         status: 'running',
         timestamp: Date.now(),
@@ -695,7 +700,8 @@ export class PocketAgent {
       const res = await runAgyTask({
         prompt: trimmed,
         model: modelName,
-        continueSession: continues,
+        conversationId: agyConversationId,
+        continueSession: !agyConversationId && continues,
         onChunk: (chunk) => callbacks.onTerminalChunk(logId, chunk),
       });
 

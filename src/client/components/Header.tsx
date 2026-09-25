@@ -13,6 +13,7 @@ import {
   MessageSquare,
   Camera,
   Terminal,
+  PanelLeft,
 } from 'lucide-react';
 import type { SystemStatus } from '../../shared/types.js';
 
@@ -21,6 +22,8 @@ interface HeaderProps {
   isConnected: boolean;
   onOpenSettings: () => void;
   onClearChat?: () => void;
+  onToggleSidebar?: () => void;
+  isSidebarOpen?: boolean;
   panels?: {
     chat: boolean;
     screen: boolean;
@@ -34,6 +37,8 @@ export const Header: React.FC<HeaderProps> = ({
   isConnected,
   onOpenSettings,
   onClearChat,
+  onToggleSidebar,
+  isSidebarOpen,
   panels,
   onTogglePanel,
 }) => {
@@ -41,7 +46,20 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="sticky top-0 z-30 w-full border-b border-border/80 bg-background/90 backdrop-blur-md px-3 sm:px-6 py-2.5 sm:py-3">
       <div className="flex items-center justify-between gap-2 max-w-[1920px] mx-auto">
         {/* Brand & Connection State */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2 sm:gap-2.5">
+          {onToggleSidebar && (
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={onToggleSidebar}
+              className={`h-8 w-8 border-border/70 hover:bg-secondary/60 text-muted-foreground ${
+                isSidebarOpen ? 'text-primary border-primary/40 bg-primary/10' : ''
+              }`}
+              title="Toggle Conversations Sidebar"
+            >
+              <PanelLeft className="w-4 h-4" />
+            </Button>
+          )}
           <div className="relative flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 text-primary">
             <Laptop className="w-4 h-4" />
             <span
