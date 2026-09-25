@@ -38,7 +38,7 @@ const messages: ChatMessage[] = [
     id: 'welcome-1',
     role: 'assistant',
     content:
-      "👋 **Welcome to PocketBridge!**\n\nI am your Mac's autonomous AI bridge. From your phone or remote browser, you can command me to:\n- 📸 **Take screenshots** and inspect running apps\n- 💻 **Run shell commands & tests** (`git`, `npm test`, `pytest`)\n- 🌐 **Search Google / the web** for docs and answers\n- 📱 **Send Telegram messages**\n\nTap a quick action below or type a request!",
+      "**Welcome to PocketBridge!**\n\nI am your Mac's autonomous AI bridge. From your phone or remote browser, you can command me to:\n- **Take screenshots** and inspect running apps\n- **Run shell commands & tests** (`git`, `npm test`, `pytest`)\n- **Search Google / the web** for docs and answers\n- **Send Telegram messages**\n\nTap a quick action below or type a request!",
     timestamp: Date.now(),
     status: 'done',
   },
@@ -490,7 +490,7 @@ TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
             const shotMsg: ChatMessage = {
               id: `shot-${Date.now()}`,
               role: 'assistant',
-              content: `📸 **Screenshot captured** at ${new Date(shot.timestamp).toLocaleTimeString()}`,
+              content: `**Screenshot captured** at ${new Date(shot.timestamp).toLocaleTimeString()}`,
               screenshotUrl: shot.publicUrl,
               timestamp: shot.timestamp,
               status: 'done',
@@ -507,7 +507,7 @@ TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
             const photoMsg: ChatMessage = {
               id: `camera-${Date.now()}`,
               role: 'assistant',
-              content: `📸 **Webcam photo captured** at ${new Date(photo.timestamp).toLocaleTimeString()}`,
+              content: `**Webcam photo captured** at ${new Date(photo.timestamp).toLocaleTimeString()}`,
               screenshotUrl: photo.publicUrl,
               timestamp: photo.timestamp,
               status: 'done',
@@ -546,7 +546,7 @@ TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
             const gitMsg: ChatMessage = {
               id: `git-${Date.now()}`,
               role: 'assistant',
-              content: `📊 **Git Status**:\n\`\`\`bash\n${res.output.trim() || 'Clean working tree.'}\n\`\`\``,
+              content: `**Git Status**:\n\`\`\`bash\n${res.output.trim() || 'Clean working tree.'}\n\`\`\``,
               timestamp: Date.now(),
               status: 'done',
             };
@@ -557,7 +557,7 @@ TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
             const sysMsg: ChatMessage = {
               id: `sys-${Date.now()}`,
               role: 'assistant',
-              content: `💻 **Mac System Info**\n- **Host**: \`${status.bonjourHost}\` (${status.localIp})\n- **CPU**: ${status.cpuModel}\n- **RAM**: ${status.memory.freeGb} GB free / ${status.memory.totalGb} GB (${status.memory.usedPercent}% used)\n- **Battery**: ${status.battery ? `${status.battery.percent}% (${status.battery.isCharging ? 'Charging' : 'On Battery'})` : 'Desktop/Plugged in'}\n- **Uptime**: ${Math.floor(status.uptime / 3600)}h ${Math.floor((status.uptime % 3600) / 60)}m`,
+              content: `**Mac System Info**\n- **Host**: \`${status.bonjourHost}\` (${status.localIp})\n- **CPU**: ${status.cpuModel}\n- **RAM**: ${status.memory.freeGb} GB free / ${status.memory.totalGb} GB (${status.memory.usedPercent}% used)\n- **Battery**: ${status.battery ? `${status.battery.percent}% (${status.battery.isCharging ? 'Charging' : 'On Battery'})` : 'Desktop/Plugged in'}\n- **Uptime**: ${Math.floor(status.uptime / 3600)}h ${Math.floor((status.uptime % 3600) / 60)}m`,
               timestamp: Date.now(),
               status: 'done',
             };
@@ -590,12 +590,12 @@ TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
   const bonjourHost = os.hostname().replace(/\.local$/, '');
 
   console.log(`\n========================================================`);
-  console.log(`🚀 PocketBridge Server is Running!`);
-  console.log(`📍 Local Wi-Fi URL:  http://${localIp}:${PORT}`);
+  console.log(`PocketBridge Server is Running!`);
+  console.log(`Local Wi-Fi URL:  http://${localIp}:${PORT}`);
   if (tailscaleIp) {
-    console.log(`🔒 Tailscale Remote URL: http://${tailscaleIp}:${PORT}`);
+    console.log(`Tailscale Remote URL: http://${tailscaleIp}:${PORT}`);
   }
-  console.log(`🍎 Bonjour/mDNS URL: http://${bonjourHost}.local:${PORT}`);
+  console.log(`Bonjour/mDNS URL: http://${bonjourHost}.local:${PORT}`);
   console.log(`========================================================\n`);
 }
 

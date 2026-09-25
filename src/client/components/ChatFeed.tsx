@@ -8,6 +8,7 @@ import {
   Bot,
   User,
   Camera,
+  Monitor,
   Terminal,
   Search,
   MessageSquare,
@@ -525,8 +526,18 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                               className="w-full max-h-52 sm:max-h-64 object-contain cursor-pointer transition-transform hover:scale-[1.01]"
                               onClick={() => setPreviewImageUrl(url)}
                             />
-                            <div className="absolute top-2 left-2 bg-black/75 backdrop-blur-sm text-[10px] text-white/90 px-2 py-0.5 rounded-full border border-white/10 font-medium">
-                              {url.includes('camera') ? '📷 Webcam Photo' : '🖥️ Screen Capture'}
+                            <div className="absolute top-2 left-2 bg-black/75 backdrop-blur-sm text-[10px] text-white/90 px-2 py-0.5 rounded-full border border-white/10 font-medium flex items-center gap-1.5">
+                              {url.includes('camera') ? (
+                                <>
+                                  <Camera className="w-3 h-3 text-sky-400" />
+                                  <span>Webcam Photo</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Monitor className="w-3 h-3 text-sky-400" />
+                                  <span>Screen Capture</span>
+                                </>
+                              )}
                             </div>
                             <button
                               type="button"
@@ -639,7 +650,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isListening ? '🎙️ Listening to your voice...' : "Type a message or '/' for commands..."}
+            placeholder={isListening ? 'Listening to voice...' : "Type a message or '/' for commands..."}
             disabled={disabled}
             className={`flex-1 bg-secondary/50 border-border/60 rounded-xl px-3.5 py-2 h-10 text-sm focus-visible:ring-1 focus-visible:ring-primary font-normal ${
               isListening ? 'ring-2 ring-rose-500 bg-rose-500/10 placeholder:text-rose-400' : ''

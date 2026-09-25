@@ -6,11 +6,11 @@ import qrcode from 'qrcode-terminal';
 const binPath = path.resolve(process.cwd(), 'bin/cloudflared');
 
 if (!fs.existsSync(binPath)) {
-  console.error('❌ cloudflared binary not found at ./bin/cloudflared.');
+  console.error('Error: cloudflared binary not found at ./bin/cloudflared.');
   process.exit(1);
 }
 
-console.log('🔒 Starting secure Cloudflare HTTPS Tunnel for PocketBridge (port 3000)...');
+console.log('Starting secure Cloudflare HTTPS Tunnel for PocketBridge (port 3000)...');
 
 const proc = spawn(binPath, ['tunnel', '--url', 'http://localhost:3000'], {
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -26,15 +26,15 @@ const onData = (data: Buffer) => {
       urlFound = true;
       const tunnelUrl = match[0];
       console.log('\n========================================================');
-      console.log('🎉 100% SECURE TRUSTED HTTPS LINK READY!');
-      console.log(`🔒 Secure URL: ${tunnelUrl}`);
+      console.log('TRUSTED HTTPS LINK READY');
+      console.log(`Secure URL: ${tunnelUrl}`);
       console.log('========================================================');
-      console.log('📱 Scan with your Phone Camera to open:');
+      console.log('Scan with your Phone Camera to open:');
       qrcode.generate(tunnelUrl, { small: true });
       console.log('========================================================');
-      console.log('✅ Trusted SSL Padlock enabled');
-      console.log('✅ Phone Microphone & Voice Input enabled');
-      console.log('✅ Works from anywhere on Wi-Fi or Cellular');
+      console.log('- Trusted SSL Padlock enabled');
+      console.log('- Phone Microphone & Voice Input enabled');
+      console.log('- Works from anywhere on Wi-Fi or Cellular');
       console.log('========================================================\n');
     }
   }

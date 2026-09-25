@@ -5,7 +5,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$DIR"
 
 echo "========================================================"
-echo "🌉 Launching PocketBridge with macOS Awake Management"
+echo "Launching PocketBridge with macOS Awake Management"
 echo "   - Keeps your Mac awake while the lid is open"
 echo "   - Naturally sleeps/hibernates when you close the lid"
 echo "========================================================"

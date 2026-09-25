@@ -10,7 +10,7 @@ import {
 import { Button } from '@/components/ui/button.js';
 import { Input } from '@/components/ui/input.js';
 import { Badge } from '@/components/ui/badge.js';
-import { Key, Lock, Send, Check, ExternalLink, Copy, Sparkles, ShieldCheck } from 'lucide-react';
+import { Key, Lock, Send, Check, ExternalLink, Copy, Sparkles, ShieldCheck, Smartphone, Brain, Zap } from 'lucide-react';
 import type { SystemStatus, ConfigSettings } from '../../shared/types.js';
 
 interface SettingsModalProps {
@@ -89,7 +89,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* Mobile Connection Info Banner */}
           <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 space-y-2">
             <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-primary">📱 Phone Access URL</span>
+              <span className="font-semibold text-primary flex items-center gap-1.5">
+                <Smartphone className="w-3.5 h-3.5 text-primary" />
+                Phone Access URL
+              </span>
               <button
                 type="button"
                 onClick={copyConnectionUrl}
@@ -113,7 +116,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="flex items-center justify-between text-xs">
                 <span className="font-semibold text-emerald-400 flex items-center gap-1.5">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                  🔒 Tailscale 24/7 Remote URL
+                  Tailscale 24/7 Remote URL
                 </span>
                 <button
                   type="button"
@@ -186,7 +189,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     : 'border-border/60 bg-secondary/40 text-muted-foreground hover:bg-secondary/60'
                 }`}
               >
-                <span className="font-semibold block text-violet-400">🧠 Pro (Default)</span>
+                <span className="font-semibold flex items-center gap-1.5 text-violet-400">
+                  <Brain className="w-3.5 h-3.5" />
+                  Pro (Default)
+                </span>
                 <span className="text-[10px] text-muted-foreground block mt-0.5 leading-snug">
                   Gemini 3.8 Flash High via Antigravity (--dangerously-skip-permissions)
                 </span>
@@ -201,7 +207,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     : 'border-border/60 bg-secondary/40 text-muted-foreground hover:bg-secondary/60'
                 }`}
               >
-                <span className="font-semibold block text-primary">⚡ Flash</span>
+                <span className="font-semibold flex items-center gap-1.5 text-primary">
+                  <Zap className="w-3.5 h-3.5" />
+                  Flash
+                </span>
                 <span className="text-[10px] text-muted-foreground block mt-0.5 leading-snug">
                   Lightweight Gemini Flash for basic Mac control
                 </span>

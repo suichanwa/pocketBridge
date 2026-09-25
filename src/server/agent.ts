@@ -269,7 +269,7 @@ export class PocketAgent {
       const cmdPrefix = trimmed.startsWith('/agy ') ? '/agy ' : '/antigravity ';
       const agyPrompt = trimmed.substring(cmdPrefix.length).trim();
       if (!agyPrompt) {
-        const msg = '⚠️ Usage: `/agy <task>` (e.g. `/agy fix tests in server.ts`)';
+        const msg = 'Usage: `/agy <task>` (e.g. `/agy fix tests in server.ts`)';
         callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
         return msg;
       }
@@ -285,7 +285,7 @@ export class PocketAgent {
 
       callbacks.onUpdateMessage(assistantMessageId, {
         status: 'thinking',
-        content: `⚡ **Delegating to Antigravity CLI (Gemini 3.8 Flash High)**...\n> "${agyPrompt}"\n\n*Running autonomously with \`--dangerously-skip-permissions\`...*`,
+        content: `**Delegating to Antigravity CLI (Gemini 3.8 Flash High)**...\n> "${agyPrompt}"\n\n*Running autonomously with \`--dangerously-skip-permissions\`...*`,
       });
 
       const res = await runAgyTask({
@@ -294,7 +294,7 @@ export class PocketAgent {
       });
 
       callbacks.onTerminalChunk(logId, '', res.exitCode);
-      const msg = `⚡ **Antigravity Result** (Gemini 3.8 Flash High):\n\n${res.output}`;
+      const msg = `**Antigravity Result** (Gemini 3.8 Flash High):\n\n${res.output}`;
       callbacks.onUpdateMessage(assistantMessageId, {
         status: res.exitCode === 0 ? 'done' : 'error',
         content: msg,
@@ -326,7 +326,7 @@ export class PocketAgent {
       callbacks.onScreenshotReady(photo.publicUrl);
       callbacks.onUpdateMessage(assistantMessageId, {
         status: 'done',
-        content: `📸 **Captured photo from Mac camera** at ${new Date(photo.timestamp).toLocaleTimeString()}:`,
+        content: `**Captured photo from Mac camera** at ${new Date(photo.timestamp).toLocaleTimeString()}:`,
         screenshotUrl: photo.publicUrl,
       });
       return `Captured photo from Mac camera: ${photo.publicUrl}`;
@@ -378,11 +378,11 @@ export class PocketAgent {
       const appName = trimmed.substring(6).trim();
       try {
         const res = await openApp(appName);
-        const msg = `🚀 **Opened Mac app**: \`${res.appName}\``;
+        const msg = `**Opened Mac app**: \`${res.appName}\``;
         callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
         return msg;
       } catch (err: any) {
-        const msg = `⚠️ ${err.message}`;
+        const msg = `Failed to open app: ${err.message}`;
         callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
         return msg;
       }
@@ -393,12 +393,12 @@ export class PocketAgent {
       const x = parseFloat(parts[0]);
       const y = parseFloat(parts[1]);
       if (isNaN(x) || isNaN(y)) {
-        const msg = '⚠️ Usage: `/click <x> <y>` (e.g. `/click 500 400`)';
+        const msg = 'Usage: `/click <x> <y>` (e.g. `/click 500 400`)';
         callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
         return msg;
       }
       const res = await mouseClick({ x, y });
-      const msg = `🖱️ **Clicked mouse** at (${res.x}, ${res.y}) [${res.button}]`;
+      const msg = `**Clicked mouse** at (${res.x}, ${res.y}) [${res.button}]`;
       callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
       return msg;
     }
@@ -406,7 +406,7 @@ export class PocketAgent {
     if (trimmed.startsWith('/type ')) {
       const text = trimmed.substring(6);
       await typeText(text);
-      const msg = `⌨️ **Typed into Mac**: "${text}"`;
+      const msg = `**Typed into Mac**: "${text}"`;
       callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
       return msg;
     }
@@ -414,7 +414,7 @@ export class PocketAgent {
     if (trimmed.startsWith('/key ')) {
       const keyName = trimmed.substring(5).trim();
       const res = await pressKey(keyName);
-      const msg = `⌨️ **Pressed key**: \`${res.key}\``;
+      const msg = `**Pressed key**: \`${res.key}\``;
       callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
       return msg;
     }
@@ -422,7 +422,7 @@ export class PocketAgent {
     if (trimmed.startsWith('/hotkey ')) {
       const combo = trimmed.substring(8).trim();
       const res = await hotkey(combo);
-      const msg = `⌨️ **Executed shortcut**: \`${res.combination}\``;
+      const msg = `**Executed shortcut**: \`${res.combination}\``;
       callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
       return msg;
     }
@@ -431,7 +431,7 @@ export class PocketAgent {
       const rest = trimmed.substring(4).trim();
       const firstSpace = rest.indexOf(' ');
       if (firstSpace === -1) {
-        const msg = '⚠️ Usage: `/tg <recipient> <message>`\n*Examples:*\n- `/tg me Hello from my Mac!`\n- `/tg @username Hey, how are you?`\n- `/tg +1234567890 Meeting in 5 minutes`';
+        const msg = 'Usage: `/tg <recipient> <message>`\n*Examples:*\n- `/tg me Hello from my Mac!`\n- `/tg @username Hey, how are you?`\n- `/tg +1234567890 Meeting in 5 minutes`';
         callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
         return msg;
       }
@@ -440,11 +440,11 @@ export class PocketAgent {
 
       const res = await sendTelegramMessage({ recipient, message });
       if (res.success) {
-        const msg = `✈️ **Telegram message sent** to \`${res.recipient}\`:\n> ${message}`;
+        const msg = `**Telegram message sent** to \`${res.recipient}\`:\n> ${message}`;
         callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
         return msg;
       } else {
-        const msg = `⚠️ **Failed to send Telegram message**: ${res.error}`;
+        const msg = `**Failed to send Telegram message**: ${res.error}`;
         callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
         return msg;
       }
@@ -453,7 +453,7 @@ export class PocketAgent {
     if (trimmed.startsWith('/say ')) {
       const textToSpeak = trimmed.substring(5).trim();
       if (!textToSpeak) {
-        const msg = '⚠️ Usage: `/say <text>` (e.g. `/say Hello from my phone!`)';
+        const msg = 'Usage: `/say <text>` (e.g. `/say Hello from my phone!`)';
         callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
         return msg;
       }
@@ -462,7 +462,7 @@ export class PocketAgent {
         content: `Speaking on Mac speakers: "${textToSpeak}"...`,
       });
       await speakAloud(textToSpeak);
-      const msg = `🗣️ **Spoke aloud on Mac speakers**:\n> "${textToSpeak}"`;
+      const msg = `**Spoke aloud on Mac speakers**:\n> "${textToSpeak}"`;
       callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
       return msg;
     }
@@ -472,7 +472,7 @@ export class PocketAgent {
       const rest = trimmed.substring(cmdPrefix.length).trim();
       const firstSpace = rest.indexOf(' ');
       if (firstSpace === -1) {
-        const msg = '⚠️ Usage: `/tgvoice <recipient> <message>`\n*Examples:*\n- `/tgvoice me Hello from my Mac voice note!`\n- `/tgvoice @username Hey, listen to this!`';
+        const msg = 'Usage: `/tgvoice <recipient> <message>`\n*Examples:*\n- `/tgvoice me Hello from my Mac voice note!`\n- `/tgvoice @username Hey, listen to this!`';
         callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
         return msg;
       }
@@ -486,11 +486,11 @@ export class PocketAgent {
 
       const res = await sendTelegramMessage({ recipient, message, isVoiceNote: true });
       if (res.success) {
-        const msg = `🎙️ **Telegram Voice Note delivered** to \`${res.recipient}\`:\n> "${message}"`;
+        const msg = `**Telegram Voice Note delivered** to \`${res.recipient}\`:\n> "${message}"`;
         callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
         return msg;
       } else {
-        const msg = `⚠️ **Failed to send Telegram voice note**: ${res.error}`;
+        const msg = `**Failed to send Telegram voice note**: ${res.error}`;
         callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
         return msg;
       }
@@ -500,7 +500,7 @@ export class PocketAgent {
       const res = await executeShellCommand('pmset -g batt; uptime');
       callbacks.onUpdateMessage(assistantMessageId, {
         status: 'done',
-        content: `💻 **Mac System Status**:\n\`\`\`bash\n${res.output.trim()}\n\`\`\``,
+        content: `**Mac System Status**:\n\`\`\`bash\n${res.output.trim()}\n\`\`\``,
       });
       return res.output;
     }
@@ -508,7 +508,7 @@ export class PocketAgent {
     if (trimmed.toLowerCase() === '/clear' || trimmed.toLowerCase() === 'clear') {
       callbacks.onUpdateMessage(assistantMessageId, {
         status: 'done',
-        content: '🧹 Chat cleared.',
+        content: 'Chat cleared.',
       });
       return 'Chat cleared.';
     }
@@ -527,7 +527,7 @@ export class PocketAgent {
 
       callbacks.onUpdateMessage(assistantMessageId, {
         status: 'thinking',
-        content: '🧠 Thinking with Antigravity (Gemini 3.8 Flash High)...',
+        content: 'Thinking with Antigravity (Gemini 3.8 Flash High)...',
       });
 
       const res = await runAgyTask({
@@ -557,7 +557,7 @@ export class PocketAgent {
     // 3. Flash Mode: If no Gemini API Key is configured yet, guide the user
     if (!this.hasKey()) {
       const msg =
-        "🔑 **PocketBridge is ready!**\n\nTo enable full autonomous AI actions (natural language tool execution, testing apps, web searches, and auto-screenshots), please enter your **Gemini API Key** in the **Settings** modal.\n\n*In the meantime, you can test immediate direct commands:*\n- `/screenshot` — Grab live desktop screenshot\n- `/open <app>` — Open any Mac app (e.g. /open Safari)\n- `/click <x> <y>` — Click coordinates on Mac screen\n- `/type <text>` — Type text into active window\n- `/key <key>` — Press key (enter, space, esc, tab)\n- `/hotkey <combo>` — Shortcut (e.g. /hotkey cmd+space)\n- `/git status` — Run git commands\n- `/sh <command>` — Run any terminal command directly";
+        "**PocketBridge is ready!**\n\nTo enable full autonomous AI actions (natural language tool execution, testing apps, web searches, and auto-screenshots), please enter your **Gemini API Key** in the **Settings** modal.\n\n*In the meantime, you can test immediate direct commands:*\n- `/screenshot` — Grab live desktop screenshot\n- `/open <app>` — Open any Mac app (e.g. /open Safari)\n- `/click <x> <y>` — Click coordinates on Mac screen\n- `/type <text>` — Type text into active window\n- `/key <key>` — Press key (enter, space, esc, tab)\n- `/hotkey <combo>` — Shortcut (e.g. /hotkey cmd+space)\n- `/git status` — Run git commands\n- `/sh <command>` — Run any terminal command directly";
       callbacks.onUpdateMessage(assistantMessageId, {
         status: 'done',
         content: msg,
@@ -634,17 +634,10 @@ Guidelines:
 6. If a task requires deep code editing, project building, fixing tricky bugs, or writing files across repositories, delegate it via run_agy_task!
 `;
 
-      const candidateModels =
-        this.modelTier === 'pro'
-          ? [
-              'gemini-pro-latest',
-              'gemini-flash-latest',
-              'gemini-flash-lite-latest',
-            ]
-          : [
-              'gemini-flash-latest',
-              'gemini-flash-lite-latest',
-            ];
+      const candidateModels = [
+        'gemini-flash-latest',
+        'gemini-flash-lite-latest',
+      ];
 
       const generateWithFallback = async (contents: any[]) => {
         let lastErr: any = null;
@@ -852,7 +845,7 @@ Guidelines:
 
               callbacks.onUpdateMessage(assistantMessageId, {
                 status: 'thinking',
-                content: `⚡ **Delegating to Antigravity (${model})**...\n> "${prompt}"`,
+                content: `**Delegating to Antigravity (${model})**...\n> "${prompt}"`,
                 toolCalls: [...toolRecords],
               });
 
@@ -916,11 +909,11 @@ Guidelines:
       return finalFallback;
     } catch (err: any) {
       console.error('Gemini Agent Error:', err);
-      let errMessage = `⚠️ Error during agent execution: ${err?.message || 'Unknown error'}`;
+      let errMessage = `Error during agent execution: ${err?.message || 'Unknown error'}`;
       if (err?.status === 503 || err?.message?.includes('503') || err?.message?.includes('high demand')) {
-        errMessage = `⚠️ **Google AI temporary capacity spike (503)**:\nThe AI model is temporarily experiencing high global demand. Please try sending your request again in a few moments, or use direct commands:\n- \`/screenshot\` — Grab live desktop screenshot\n- \`/camera\` — Snap webcam photo\n- \`/git <command>\` — Run git command\n- \`/sh <command>\` — Run terminal command\n- \`/system\` — View battery & memory info`;
+        errMessage = `**Google AI temporary capacity spike (503)**:\nThe AI model is temporarily experiencing high global demand. Please try sending your request again in a few moments, or use direct commands:\n- \`/screenshot\` — Grab live desktop screenshot\n- \`/camera\` — Snap webcam photo\n- \`/git <command>\` — Run git command\n- \`/sh <command>\` — Run terminal command\n- \`/system\` — View battery & memory info`;
       } else if (err?.status === 429 || err?.message?.includes('429') || err?.message?.includes('quota')) {
-        errMessage = `⚠️ **Google AI Quota Limit (429)**:\nYour API key reached its rate limit or quota. If using Pro models, ensure your key is linked to a billing account or switch Model Tier to 'Flash' in Settings.\n\n*Direct slash commands remain operational:* \`/screenshot\`, \`/camera\`, \`/sh\`, \`/git\`.`;
+        errMessage = `**Google AI Quota Limit (429)**:\nYour API key reached its rate limit or quota. If using Pro models, ensure your key is linked to a billing account or switch Model Tier to 'Flash' in Settings.\n\n*Direct slash commands remain operational:* \`/screenshot\`, \`/camera\`, \`/sh\`, \`/git\`.`;
       }
       callbacks.onUpdateMessage(assistantMessageId, {
         status: 'error',
