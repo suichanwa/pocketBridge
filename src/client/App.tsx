@@ -121,8 +121,6 @@ export function App() {
             <ChatFeed
               messages={messages}
               onSendMessage={sendMessage}
-              onQuickAction={sendQuickAction}
-              onViewImage={() => setActiveTab('screen')}
               disabled={!isConnected}
             />
           </TabsContent>
@@ -148,8 +146,6 @@ export function App() {
           <ChatFeed
             messages={messages}
             onSendMessage={sendMessage}
-            onQuickAction={sendQuickAction}
-            onViewImage={() => {}}
             disabled={!isConnected}
           />
         </div>

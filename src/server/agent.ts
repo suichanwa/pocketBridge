@@ -187,6 +187,15 @@ export class PocketAgent {
       return res.output;
     }
 
+    if (trimmed === '/system' || trimmed === '/sys') {
+      const res = await executeShellCommand('pmset -g batt; uptime');
+      callbacks.onUpdateMessage(assistantMessageId, {
+        status: 'done',
+        content: `💻 **Mac System Status**:\n\`\`\`bash\n${res.output.trim()}\n\`\`\``,
+      });
+      return res.output;
+    }
+
     // 2. If no Gemini API Key is configured yet, guide the user
     if (!this.hasKey()) {
       const msg =

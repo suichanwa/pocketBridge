@@ -69,7 +69,8 @@ async function getMacBattery(): Promise<{ percent: number; isCharging: boolean }
   try {
     const { stdout } = await execa('/usr/bin/pmset', ['-g', 'batt']);
     const percentMatch = stdout.match(/(\d+)%/);
-    const isCharging = stdout.includes('charging') || stdout.includes('AC Power');
+    const isDischarging = stdout.includes('discharging');
+    const isCharging = !isDischarging && (stdout.includes('; charging;') || stdout.includes('AC Power'));
     if (percentMatch) {
       return {
         percent: parseInt(percentMatch[1], 10),
@@ -80,6 +81,49 @@ async function getMacBattery(): Promise<{ percent: number; isCharging: boolean }
     // Battery check is optional
   }
   return undefined;
+}
+
+/**
+ * Calculates accurate macOS memory usage via vm_stat and sysctl.
+ * Node's os.freemem() only accounts for completely unallocated memory,
+ * ignoring inactive cache pages that macOS reclaims dynamically.
+ */
+async function getMacMemoryStats(): Promise<{ totalGb: string; freeGb: string; usedPercent: number }> {
+  try {
+    const { stdout: vmOut } = await execa('/usr/bin/vm_stat');
+    const pageSizeMatch = vmOut.match(/page size of (\d+) bytes/);
+    const pageSize = pageSizeMatch ? parseInt(pageSizeMatch[1], 10) : 4096;
+
+    const getVal = (key: string) => {
+      const m = vmOut.match(new RegExp(key + ':\\s+(\\d+)'));
+      return m ? parseInt(m[1], 10) * pageSize : 0;
+    };
+
+    const active = getVal('Pages active');
+    const wired = getVal('Pages wired down');
+    const compressor = getVal('Pages occupied by compressor');
+
+    const { stdout: totalOut } = await execa('/usr/sbin/sysctl', ['-n', 'hw.memsize']);
+    const totalMem = parseInt(totalOut.trim(), 10) || os.totalmem();
+
+    const usedMem = active + wired + compressor;
+    const availableMem = Math.max(0, totalMem - usedMem);
+    const usedPercent = Math.min(100, Math.max(0, Math.round((usedMem / totalMem) * 100)));
+
+    return {
+      totalGb: (totalMem / 1024 / 1024 / 1024).toFixed(1),
+      freeGb: (availableMem / 1024 / 1024 / 1024).toFixed(1),
+      usedPercent,
+    };
+  } catch {
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    return {
+      totalGb: (totalMem / 1024 / 1024 / 1024).toFixed(1),
+      freeGb: (freeMem / 1024 / 1024 / 1024).toFixed(1),
+      usedPercent: Math.round(((totalMem - freeMem) / totalMem) * 100),
+    };
+  }
 }
 
 /**
@@ -105,9 +149,7 @@ async function getLiveSystemStatus(): Promise<SystemStatus> {
   const localIp = getPrimaryLocalIp();
   const rawHostname = os.hostname();
   const cleanHostname = rawHostname.replace(/\.local$/, '');
-  const totalMem = os.totalmem();
-  const freeMem = os.freemem();
-  const usedPercent = Math.round(((totalMem - freeMem) / totalMem) * 100);
+  const memory = await getMacMemoryStats();
   const battery = await getMacBattery();
 
   const cpus = os.cpus();
@@ -121,11 +163,7 @@ async function getLiveSystemStatus(): Promise<SystemStatus> {
     uptime: Math.round(os.uptime()),
     platform: `${os.type()} ${os.release()} (${os.arch()})`,
     cpuModel,
-    memory: {
-      totalGb: (totalMem / 1024 / 1024 / 1024).toFixed(1),
-      freeGb: (freeMem / 1024 / 1024 / 1024).toFixed(1),
-      usedPercent,
-    },
+    memory,
     battery,
     hasGeminiKey: agent.hasKey(),
     hasTelegramConfig: Boolean(process.env.TELEGRAM_API_ID && process.env.TELEGRAM_API_HASH),
