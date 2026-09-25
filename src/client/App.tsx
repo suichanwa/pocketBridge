@@ -68,24 +68,27 @@ export function App() {
   });
 
   const [maximizedPanel, setMaximizedPanel] = useState<'chat' | 'screen' | 'terminal' | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const sideColRef = useRef<HTMLDivElement>(null);
   const isDraggingH = useRef(false);
   const isDraggingV = useRef(false);
-
-  // Sync to localStorage
-  useEffect(() => {
-    localStorage.setItem('pocketbridge_panels', JSON.stringify(panels));
-  }, [panels]);
+  const splitHRef = useRef(splitPercent);
+  const splitVRef = useRef(verticalSplitPercent);
 
   useEffect(() => {
-    localStorage.setItem('pocketbridge_split_h', splitPercent.toString());
+    splitHRef.current = splitPercent;
   }, [splitPercent]);
 
   useEffect(() => {
-    localStorage.setItem('pocketbridge_split_v', verticalSplitPercent.toString());
+    splitVRef.current = verticalSplitPercent;
   }, [verticalSplitPercent]);
+
+  // Sync panels to localStorage
+  useEffect(() => {
+    localStorage.setItem('pocketbridge_panels', JSON.stringify(panels));
+  }, [panels]);
 
   const togglePanel = (panel: 'chat' | 'screen' | 'terminal') => {
     setPanels((prev) => ({ ...prev, [panel]: !prev[panel] }));
@@ -111,65 +114,91 @@ export function App() {
     }
   };
 
-  // Horizontal splitter dragging
+  // Horizontal splitter dragging with RAF throttling
   const startDraggingH = (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     isDraggingH.current = true;
+    setIsDragging(true);
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
 
+    let rafId: number | null = null;
+
     const onMove = (moveEvent: MouseEvent | TouchEvent) => {
       if (!isDraggingH.current || !containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
       const clientX = 'touches' in moveEvent ? moveEvent.touches[0].clientX : moveEvent.clientX;
-      const newPercent = ((clientX - rect.left) / rect.width) * 100;
-      setSplitPercent(Math.min(80, Math.max(20, newPercent)));
+
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        if (!containerRef.current) return;
+        const rect = containerRef.current.getBoundingClientRect();
+        const newPercent = Math.min(80, Math.max(20, ((clientX - rect.left) / rect.width) * 100));
+        setSplitPercent(newPercent);
+      });
     };
 
     const onUp = () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
       isDraggingH.current = false;
+      setIsDragging(false);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
+      try {
+        localStorage.setItem('pocketbridge_split_h', splitHRef.current.toString());
+      } catch {}
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
       window.removeEventListener('touchmove', onMove);
       window.removeEventListener('touchend', onUp);
     };
 
-    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mousemove', onMove, { passive: true });
     window.addEventListener('mouseup', onUp);
-    window.addEventListener('touchmove', onMove);
+    window.addEventListener('touchmove', onMove, { passive: true });
     window.addEventListener('touchend', onUp);
   };
 
-  // Vertical splitter dragging
+  // Vertical splitter dragging with RAF throttling
   const startDraggingV = (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     isDraggingV.current = true;
+    setIsDragging(true);
     document.body.style.cursor = 'row-resize';
     document.body.style.userSelect = 'none';
 
+    let rafId: number | null = null;
+
     const onMove = (moveEvent: MouseEvent | TouchEvent) => {
       if (!isDraggingV.current || !sideColRef.current) return;
-      const rect = sideColRef.current.getBoundingClientRect();
       const clientY = 'touches' in moveEvent ? moveEvent.touches[0].clientY : moveEvent.clientY;
-      const newPercent = ((clientY - rect.top) / rect.height) * 100;
-      setVerticalSplitPercent(Math.min(80, Math.max(20, newPercent)));
+
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        if (!sideColRef.current) return;
+        const rect = sideColRef.current.getBoundingClientRect();
+        const newPercent = Math.min(80, Math.max(20, ((clientY - rect.top) / rect.height) * 100));
+        setVerticalSplitPercent(newPercent);
+      });
     };
 
     const onUp = () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
       isDraggingV.current = false;
+      setIsDragging(false);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
+      try {
+        localStorage.setItem('pocketbridge_split_v', splitVRef.current.toString());
+      } catch {}
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
       window.removeEventListener('touchmove', onMove);
       window.removeEventListener('touchend', onUp);
     };
 
-    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mousemove', onMove, { passive: true });
     window.addEventListener('mouseup', onUp);
-    window.addEventListener('touchmove', onMove);
+    window.addEventListener('touchmove', onMove, { passive: true });
     window.addEventListener('touchend', onUp);
   };
 
@@ -320,11 +349,21 @@ export function App() {
           </div>
         )}
 
+        {/* Fullscreen overlay during dragging to prevent event dropping */}
+        {isDragging && (
+          <div
+            className="fixed inset-0 z-50 pointer-events-auto select-none"
+            style={{ cursor: isDraggingH.current ? 'col-resize' : 'row-resize' }}
+          />
+        )}
+
         {/* Left Column: Chat Conversation */}
         {isChatVisible && (
           <div
             style={{ width: hasBothColumns ? `${splitPercent}%` : '100%' }}
-            className="flex flex-col h-full rounded-xl border border-border/80 bg-card/40 backdrop-blur-sm overflow-hidden shadow-sm transition-all duration-75"
+            className={`flex flex-col h-full rounded-xl border border-border/80 bg-card/40 overflow-hidden shadow-sm ${
+              isDragging ? 'pointer-events-none select-none' : 'backdrop-blur-sm'
+            }`}
           >
             {/* Chat Panel Header */}
             <div className="flex items-center justify-between py-1.5 px-3 border-b border-border/40 bg-card/60">
@@ -370,10 +409,16 @@ export function App() {
           <div
             onMouseDown={startDraggingH}
             onTouchStart={startDraggingH}
-            className="w-3 hover:w-3 z-10 cursor-col-resize flex items-center justify-center group select-none shrink-0"
+            className={`w-3 hover:w-3 z-10 cursor-col-resize flex items-center justify-center group select-none shrink-0 ${
+              isDragging ? 'cursor-col-resize' : ''
+            }`}
             title="Drag to resize columns"
           >
-            <div className="w-1 h-12 rounded-full bg-border/60 group-hover:bg-primary transition-colors flex items-center justify-center">
+            <div
+              className={`w-1 h-12 rounded-full transition-colors flex items-center justify-center ${
+                isDragging ? 'bg-primary' : 'bg-border/60 group-hover:bg-primary'
+              }`}
+            >
               <GripVertical className="w-2.5 h-2.5 text-muted-foreground group-hover:text-primary-foreground opacity-0 group-hover:opacity-100" />
             </div>
           </div>
@@ -384,7 +429,9 @@ export function App() {
           <div
             ref={sideColRef}
             style={{ width: hasBothColumns ? `${100 - splitPercent}%` : '100%' }}
-            className="flex flex-col h-full overflow-hidden transition-all duration-75 gap-0"
+            className={`flex flex-col h-full overflow-hidden gap-0 ${
+              isDragging ? 'pointer-events-none select-none' : ''
+            }`}
           >
             {/* Top Half: Screen Viewer */}
             {isScreenVisible && (
@@ -410,10 +457,16 @@ export function App() {
               <div
                 onMouseDown={startDraggingV}
                 onTouchStart={startDraggingV}
-                className="h-3 hover:h-3 z-10 cursor-row-resize flex items-center justify-center group select-none shrink-0"
+                className={`h-3 hover:h-3 z-10 cursor-row-resize flex items-center justify-center group select-none shrink-0 ${
+                  isDragging ? 'cursor-row-resize' : ''
+                }`}
                 title="Drag to resize panels"
               >
-                <div className="h-1 w-12 rounded-full bg-border/60 group-hover:bg-primary transition-colors flex items-center justify-center">
+                <div
+                  className={`h-1 w-12 rounded-full transition-colors flex items-center justify-center ${
+                    isDragging ? 'bg-primary' : 'bg-border/60 group-hover:bg-primary'
+                  }`}
+                >
                   <GripHorizontal className="w-2.5 h-2.5 text-muted-foreground group-hover:text-primary-foreground opacity-0 group-hover:opacity-100" />
                 </div>
               </div>
