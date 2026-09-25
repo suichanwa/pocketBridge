@@ -1,11 +1,15 @@
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
+import path from 'node:path';
+import fs from 'node:fs';
 
 let clientInstance: TelegramClient | null = null;
 
 export interface SendTelegramParams {
   recipient: string; // 'me' (Saved Messages), username (@example), phone number (+1...), or chat ID
   message: string;
+  mediaPath?: string;
+  mediaPaths?: string[];
 }
 
 export interface TelegramStatus {
@@ -50,6 +54,9 @@ export async function getTelegramClient(
   const stringSession = new StringSession(finalSession);
   const client = new TelegramClient(stringSession, Number(finalApiId), finalApiHash, {
     connectionRetries: 5,
+    deviceModel: 'MacBook Pro',
+    systemVersion: 'macOS Sequoia',
+    appVersion: '1.0.0',
   });
 
   await client.connect();
@@ -58,12 +65,25 @@ export async function getTelegramClient(
 }
 
 /**
- * Sends a message to a Telegram recipient.
+ * Helper to resolve relative capture URLs like '/captures/shot-123.png' to absolute file paths on disk.
+ */
+function resolveCapturePath(urlOrPath: string): string | null {
+  if (!urlOrPath) return null;
+  const clean = urlOrPath.trim();
+  if (fs.existsSync(clean)) return clean;
+  const basename = path.basename(clean);
+  const fullPath = path.resolve(process.cwd(), 'captures', basename);
+  if (fs.existsSync(fullPath)) return fullPath;
+  return null;
+}
+
+/**
+ * Sends a message or actual photo media to a Telegram recipient.
  * Supports:
  *  - 'me' or 'self' -> Your personal "Saved Messages"
  *  - '@username' -> Any Telegram contact or user
  *  - Phone number with country code -> Any contact
- *  - Bot token mode -> Sends via standard Telegram Bot API
+ *  - Actual photo attachments when mediaPath/mediaPaths or /captures/... URLs are present
  */
 export async function sendTelegramMessage(params: SendTelegramParams): Promise<{
   success: boolean;
@@ -76,19 +96,63 @@ export async function sendTelegramMessage(params: SendTelegramParams): Promise<{
       ? 'me'
       : params.recipient.trim();
 
+  // Find all photos/files to deliver
+  const filesToSend: string[] = [];
+
+  if (params.mediaPath) {
+    const resolved = resolveCapturePath(params.mediaPath);
+    if (resolved && !filesToSend.includes(resolved)) filesToSend.push(resolved);
+  }
+
+  if (params.mediaPaths && Array.isArray(params.mediaPaths)) {
+    for (const p of params.mediaPaths) {
+      const resolved = resolveCapturePath(p);
+      if (resolved && !filesToSend.includes(resolved)) filesToSend.push(resolved);
+    }
+  }
+
+  // Auto-detect any /captures/ image paths inside the message text
+  const captureRegex = /(?:\/)?captures\/[a-zA-Z0-9_\-.]+\.(?:png|jpg|jpeg|webp)/gi;
+  let match;
+  while ((match = captureRegex.exec(params.message)) !== null) {
+    const resolved = resolveCapturePath(match[0]);
+    if (resolved && !filesToSend.includes(resolved)) {
+      filesToSend.push(resolved);
+    }
+  }
+
   // 1. Try MTProto user account first (enables personal contacts & Saved Messages)
   const client = await getTelegramClient();
   if (client) {
     try {
-      const result = await client.sendMessage(targetRecipient, {
-        message: params.message,
-      });
+      if (filesToSend.length > 0) {
+        let lastId: number | undefined;
+        for (let i = 0; i < filesToSend.length; i++) {
+          const file = filesToSend[i];
+          const isFirst = i === 0;
+          const result: any = await client.sendFile(targetRecipient, {
+            file,
+            caption: isFirst ? params.message : undefined,
+          });
+          lastId = result.id;
+        }
 
-      return {
-        success: true,
-        recipient: targetRecipient,
-        messageId: result.id,
-      };
+        return {
+          success: true,
+          recipient: targetRecipient,
+          messageId: lastId,
+        };
+      } else {
+        const result = await client.sendMessage(targetRecipient, {
+          message: params.message,
+        });
+
+        return {
+          success: true,
+          recipient: targetRecipient,
+          messageId: result.id,
+        };
+      }
     } catch (error: any) {
       return {
         success: false,

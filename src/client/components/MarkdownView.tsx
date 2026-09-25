@@ -107,9 +107,9 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({ content }) => {
   };
 
   const formatInline = (text: string): React.ReactNode[] => {
-    // Regex splits by `code`, **bold**, *italic*, and URLs
+    // Regex splits by `code`, **bold**, *italic*, ![img](url), /captures/ images, and URLs
     const parts: React.ReactNode[] = [];
-    const regex = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|https?:\/\/[^\s]+)/g;
+    const regex = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|!\[[^\]]*\]\([^)]+\)|\/captures\/[a-zA-Z0-9_\-.]+\.(?:png|jpg|jpeg|webp)|https?:\/\/[^\s]+)/gi;
     let lastIndex = 0;
     let match;
 
@@ -138,6 +138,28 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({ content }) => {
           <em key={match.index} className="italic text-foreground/90">
             {matchText.slice(1, -1)}
           </em>
+        );
+      } else if (matchText.startsWith('![') && matchText.includes('](')) {
+        const altMatch = matchText.match(/!\[([^\]]*)\]\(([^)]+)\)/);
+        if (altMatch) {
+          parts.push(
+            <img
+              key={match.index}
+              src={altMatch[2]}
+              alt={altMatch[1] || 'Embedded image'}
+              className="my-1.5 rounded-lg border border-border/60 max-h-56 object-contain block bg-black/40"
+            />
+          );
+        }
+      } else if (matchText.startsWith('/captures/')) {
+        parts.push(
+          <span key={match.index} className="block my-1.5">
+            <img
+              src={matchText}
+              alt="Captured Photo"
+              className="rounded-lg border border-border/60 max-h-52 object-contain block bg-black/40"
+            />
+          </span>
         );
       } else if (matchText.startsWith('http')) {
         parts.push(

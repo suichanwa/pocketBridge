@@ -164,17 +164,26 @@ const agentToolDeclarations = [
   },
   {
     name: 'send_telegram_message',
-    description: 'Sends a Telegram message to a person or group using your Telegram credentials.',
+    description: 'Sends a Telegram message (or real photo files) to a person, group, or to "me" (Saved Messages). When sending a screenshot or camera photo, provide the URL or path in mediaPath or mediaPaths to deliver it as an actual photo directly on Telegram!',
     parameters: {
       type: Type.OBJECT,
       properties: {
         recipient: {
           type: Type.STRING,
-          description: 'Username (@username), phone number, or chat ID',
+          description: 'Username (@username), phone number, or "me" for your personal Saved Messages',
         },
         message: {
           type: Type.STRING,
-          description: 'The message text to send',
+          description: 'The message text or photo caption',
+        },
+        mediaPath: {
+          type: Type.STRING,
+          description: 'Optional path or URL of an image/photo to send as an actual photo file (e.g. "/captures/shot-xxx.png" or "/captures/camera-xxx.jpg")',
+        },
+        mediaPaths: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+          description: 'Optional list of multiple image paths/URLs to send as actual photo files to Telegram',
         },
       },
       required: ['recipient', 'message'],
@@ -501,6 +510,7 @@ Guidelines:
       };
 
       const toolRecords: ToolCallRecord[] = [];
+      const capturedMediaUrls: string[] = [];
       let latestScreenshotUrl: string | undefined = undefined;
 
       // Iterative function execution loop (up to 5 turns)
@@ -525,6 +535,7 @@ Guidelines:
             content: finalText,
             toolCalls: toolRecords.length > 0 ? toolRecords : undefined,
             screenshotUrl: latestScreenshotUrl,
+            mediaUrls: capturedMediaUrls.length > 0 ? [...capturedMediaUrls] : undefined,
           });
           return finalText;
         }
@@ -561,6 +572,7 @@ Guidelines:
                 windowOnly: Boolean(call.args?.windowOnly),
               });
               latestScreenshotUrl = shot.publicUrl;
+              capturedMediaUrls.push(shot.publicUrl);
               callbacks.onScreenshotReady(shot.publicUrl);
               functionResult = {
                 status: 'success',
@@ -571,6 +583,7 @@ Guidelines:
             } else if (call.name === 'take_camera_photo') {
               const photo = await takeCameraPhoto();
               latestScreenshotUrl = photo.publicUrl;
+              capturedMediaUrls.push(photo.publicUrl);
               callbacks.onScreenshotReady(photo.publicUrl);
               functionResult = {
                 status: 'success',
@@ -648,7 +661,12 @@ Guidelines:
             } else if (call.name === 'send_telegram_message') {
               const recipient = String(call.args?.recipient || '');
               const message = String(call.args?.message || '');
-              const tgRes = await sendTelegramMessage({ recipient, message });
+              const mediaPath = call.args?.mediaPath ? String(call.args.mediaPath) : undefined;
+              const mediaPaths = Array.isArray(call.args?.mediaPaths)
+                ? call.args.mediaPaths.map(String)
+                : (capturedMediaUrls.length > 0 ? [...capturedMediaUrls] : undefined);
+
+              const tgRes = await sendTelegramMessage({ recipient, message, mediaPath, mediaPaths });
               functionResult = tgRes;
             } else {
               functionResult = { error: `Unknown tool: ${call.name}` };
@@ -681,6 +699,7 @@ Guidelines:
         callbacks.onUpdateMessage(assistantMessageId, {
           toolCalls: [...toolRecords],
           screenshotUrl: latestScreenshotUrl,
+          mediaUrls: capturedMediaUrls.length > 0 ? [...capturedMediaUrls] : undefined,
         });
       }
 
@@ -690,6 +709,7 @@ Guidelines:
         content: finalFallback,
         toolCalls: toolRecords,
         screenshotUrl: latestScreenshotUrl,
+        mediaUrls: capturedMediaUrls.length > 0 ? [...capturedMediaUrls] : undefined,
       });
       return finalFallback;
     } catch (err: any) {

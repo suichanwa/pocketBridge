@@ -4,6 +4,6 @@ dist/
 .env.local
 .DS_Store
 *.log
-captures/*.png
+captures/*
 !captures/.gitkeep
 test-output/

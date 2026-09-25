@@ -350,25 +350,50 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                     </div>
                   )}
 
-                  {/* Inline Screenshot/Camera Preview if attached */}
-                  {msg.screenshotUrl && (
-                    <div className="mt-2.5 rounded-lg overflow-hidden border border-border/60 bg-black/60 relative group">
-                      <img
-                        src={msg.screenshotUrl}
-                        alt="Captured Media"
-                        className="w-full max-h-52 sm:max-h-64 object-contain cursor-pointer transition-transform hover:scale-[1.01]"
-                        onClick={() => setPreviewImageUrl(msg.screenshotUrl!)}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setPreviewImageUrl(msg.screenshotUrl!)}
-                        className="absolute bottom-2 right-2 bg-black/80 hover:bg-black text-white text-xs px-2.5 py-1 rounded-md flex items-center gap-1.5 shadow-md border border-white/10"
+                  {/* Inline Screenshot/Camera Previews if attached */}
+                  {(() => {
+                    const media =
+                      msg.mediaUrls && msg.mediaUrls.length > 0
+                        ? msg.mediaUrls
+                        : msg.screenshotUrl
+                        ? [msg.screenshotUrl]
+                        : [];
+
+                    if (media.length === 0) return null;
+
+                    return (
+                      <div
+                        className={`mt-2.5 grid gap-2 ${
+                          media.length > 1 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'
+                        }`}
                       >
-                        <Maximize2 className="w-3.5 h-3.5 text-sky-400" />
-                        <span>View Full</span>
-                      </button>
-                    </div>
-                  )}
+                        {media.map((url, idx) => (
+                          <div
+                            key={`${url}-${idx}`}
+                            className="rounded-lg overflow-hidden border border-border/60 bg-black/60 relative group"
+                          >
+                            <img
+                              src={url}
+                              alt={`Captured Media ${idx + 1}`}
+                              className="w-full max-h-52 sm:max-h-64 object-contain cursor-pointer transition-transform hover:scale-[1.01]"
+                              onClick={() => setPreviewImageUrl(url)}
+                            />
+                            <div className="absolute top-2 left-2 bg-black/75 backdrop-blur-sm text-[10px] text-white/90 px-2 py-0.5 rounded-full border border-white/10 font-medium">
+                              {url.includes('camera') ? '📷 Webcam Photo' : '🖥️ Screen Capture'}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setPreviewImageUrl(url)}
+                              className="absolute bottom-2 right-2 bg-black/80 hover:bg-black text-white text-xs px-2.5 py-1 rounded-md flex items-center gap-1.5 shadow-md border border-white/10"
+                            >
+                              <Maximize2 className="w-3.5 h-3.5 text-sky-400" />
+                              <span>View Full</span>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Timestamp */}

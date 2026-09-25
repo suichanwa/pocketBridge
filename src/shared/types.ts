@@ -17,6 +17,7 @@ export interface ChatMessage {
   status?: 'thinking' | 'streaming' | 'done' | 'error';
   toolCalls?: ToolCallRecord[];
   screenshotUrl?: string;
+  mediaUrls?: string[];
 }
 
 export interface TerminalLog {
