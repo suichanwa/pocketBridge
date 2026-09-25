@@ -90,6 +90,11 @@ const AVAILABLE_COMMANDS: CommandOption[] = [
     icon: Cpu,
   },
   {
+    name: '/tg ',
+    description: 'Send Telegram message (e.g. /tg me Hello, /tg @user Hi)',
+    icon: Send,
+  },
+  {
     name: '/sh ',
     description: 'Run arbitrary terminal command (e.g. /sh ls -la)',
     icon: Terminal,

@@ -344,6 +344,29 @@ export class PocketAgent {
       return msg;
     }
 
+    if (trimmed.startsWith('/tg ')) {
+      const rest = trimmed.substring(4).trim();
+      const firstSpace = rest.indexOf(' ');
+      if (firstSpace === -1) {
+        const msg = '⚠️ Usage: `/tg <recipient> <message>`\n*Examples:*\n- `/tg me Hello from my Mac!`\n- `/tg @username Hey, how are you?`\n- `/tg +1234567890 Meeting in 5 minutes`';
+        callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
+        return msg;
+      }
+      const recipient = rest.substring(0, firstSpace).trim();
+      const message = rest.substring(firstSpace + 1).trim();
+
+      const res = await sendTelegramMessage({ recipient, message });
+      if (res.success) {
+        const msg = `✈️ **Telegram message sent** to \`${res.recipient}\`:\n> ${message}`;
+        callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
+        return msg;
+      } else {
+        const msg = `⚠️ **Failed to send Telegram message**: ${res.error}`;
+        callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: msg });
+        return msg;
+      }
+    }
+
     if (trimmed === '/system' || trimmed === '/sys') {
       const res = await executeShellCommand('pmset -g batt; uptime');
       callbacks.onUpdateMessage(assistantMessageId, {

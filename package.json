@@ -12,7 +12,8 @@
     "build:server": "tsc -p tsconfig.server.json",
     "build": "npm run build:client && npm run build:server",
     "start": "./scripts/start-server.sh",
-    "test:responsive": "tsx test/test-responsive.ts"
+    "test:responsive": "tsx test/test-responsive.ts",
+    "telegram:login": "tsx scripts/telegram-login.ts"
   },
   "bugs": {
     "url": "https://github.com/suichanwa/pocketBridge/issues"
