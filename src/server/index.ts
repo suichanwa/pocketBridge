@@ -134,7 +134,7 @@ function getPrimaryLocalIp(): string {
   for (const list of Object.values(ifaces)) {
     if (!list) continue;
     for (const info of list) {
-      if (!info.internal && info.family === 'IPv4') {
+      if (!info.internal && info.family === 'IPv4' && !info.address.startsWith('100.')) {
         return info.address;
       }
     }
@@ -143,10 +143,27 @@ function getPrimaryLocalIp(): string {
 }
 
 /**
+ * Resolves the Tailscale IPv4 address if Tailscale is active (100.x.y.z).
+ */
+function getTailscaleIp(): string | undefined {
+  const ifaces = os.networkInterfaces();
+  for (const list of Object.values(ifaces)) {
+    if (!list) continue;
+    for (const info of list) {
+      if (!info.internal && info.family === 'IPv4' && info.address.startsWith('100.')) {
+        return info.address;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
  * Gathers live system status metrics.
  */
 async function getLiveSystemStatus(): Promise<SystemStatus> {
   const localIp = getPrimaryLocalIp();
+  const tailscaleIp = getTailscaleIp();
   const rawHostname = os.hostname();
   const cleanHostname = rawHostname.replace(/\.local$/, '');
   const memory = await getMacMemoryStats();
@@ -158,6 +175,7 @@ async function getLiveSystemStatus(): Promise<SystemStatus> {
   return {
     hostname: rawHostname,
     localIp,
+    tailscaleIp,
     bonjourHost: `${cleanHostname}.local`,
     port: PORT,
     uptime: Math.round(os.uptime()),
@@ -568,11 +586,15 @@ TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
 
   await app.listen({ port: PORT, host: HOST });
   const localIp = getPrimaryLocalIp();
+  const tailscaleIp = getTailscaleIp();
   const bonjourHost = os.hostname().replace(/\.local$/, '');
 
   console.log(`\n========================================================`);
   console.log(`🚀 PocketBridge Server is Running!`);
   console.log(`📍 Local Wi-Fi URL:  http://${localIp}:${PORT}`);
+  if (tailscaleIp) {
+    console.log(`🔒 Tailscale Remote URL: http://${tailscaleIp}:${PORT}`);
+  }
   console.log(`🍎 Bonjour/mDNS URL: http://${bonjourHost}.local:${PORT}`);
   console.log(`========================================================\n`);
 }

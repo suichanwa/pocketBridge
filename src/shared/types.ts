@@ -32,6 +32,7 @@ export interface TerminalLog {
 export interface SystemStatus {
   hostname: string;
   localIp: string;
+  tailscaleIp?: string;
   bonjourHost: string;
   port: number;
   uptime: number;
