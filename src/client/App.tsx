@@ -229,7 +229,7 @@ export function App() {
   // PIN Authentication Gate
   if (!isAuthenticated && status?.pinRequired) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground p-4">
+      <div className="flex flex-col items-center justify-center min-h-[100dvh] bg-background text-foreground p-4">
         <div className="w-full max-w-sm p-6 rounded-2xl border border-border/80 bg-card/80 backdrop-blur-md shadow-xl text-center space-y-4">
           <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-500 flex items-center justify-center mx-auto">
             <ShieldAlert className="w-6 h-6" />
@@ -267,7 +267,7 @@ export function App() {
   const noPanelsVisible = !isChatVisible && !isScreenVisible && !isTerminalVisible;
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-background text-foreground">
+    <div className="flex flex-col h-[100dvh] w-screen overflow-hidden overscroll-none bg-background text-foreground">
       {/* Top Header */}
       <Header
         status={status}

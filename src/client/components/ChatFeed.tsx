@@ -179,9 +179,13 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
     if (currentFirstMsgId !== prevFirstMsgIdRef.current) {
       prevFirstMsgIdRef.current = currentFirstMsgId;
       setVisibleCount(PAGE_SIZE);
+      isNearBottomRef.current = true;
       requestAnimationFrame(() => {
         if (scrollContainerRef.current) {
-          scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+          const el = scrollContainerRef.current;
+          if (el.scrollHeight > el.clientHeight) {
+            el.scrollTop = el.scrollHeight;
+          }
         }
       });
     }
@@ -217,25 +221,52 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
     const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     isNearBottomRef.current = distanceToBottom < 80;
 
-    // Upward infinite scroll trigger when reaching within 60px of top
-    if (container.scrollTop < 60 && hasMore && !isLoadingMoreRef.current) {
+    // Upward infinite scroll trigger when reaching within 60px of top (only if container has scroll overflow)
+    if (
+      container.scrollTop < 60 &&
+      hasMore &&
+      !isLoadingMoreRef.current &&
+      container.scrollHeight > container.clientHeight + 100
+    ) {
       loadMoreMessages();
     }
   };
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    if (el.scrollHeight > el.clientHeight) {
+      el.scrollTo({
+        top: el.scrollHeight,
+        behavior,
+      });
+    }
   };
+
+  const lastMessage = messages[messages.length - 1];
+  const lastMessageContent = lastMessage?.content;
+  const lastMessageToolCount = lastMessage?.toolCalls?.length || 0;
+  const lastMessageStatus = lastMessage?.status;
 
   useEffect(() => {
     // Only auto-scroll to bottom if new messages were appended and user was near bottom
     if (messages.length > prevLenRef.current) {
       if (isNearBottomRef.current) {
-        scrollToBottom();
+        scrollToBottom('smooth');
       }
     }
     prevLenRef.current = messages.length;
   }, [messages.length]);
+
+  useEffect(() => {
+    // Keep feed scrolled to bottom while assistant is streaming response or tools
+    if (isNearBottomRef.current && lastMessageStatus === 'thinking') {
+      const el = scrollContainerRef.current;
+      if (el && el.scrollHeight > el.clientHeight) {
+        el.scrollTop = el.scrollHeight;
+      }
+    }
+  }, [lastMessageContent, lastMessageToolCount, lastMessageStatus]);
 
   // Autocomplete filtering
   const matchingCommands = inputText.startsWith('/')
@@ -452,7 +483,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-4"
+        className="flex-1 overflow-y-auto overscroll-y-contain p-3 sm:p-4 pb-6 space-y-4"
       >
         {/* Load older messages trigger indicator */}
         {hasMore && (
@@ -632,6 +663,11 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                               alt={`Captured Media ${idx + 1}`}
                               className="w-full max-h-52 sm:max-h-64 object-contain cursor-pointer transition-transform hover:scale-[1.01]"
                               onClick={() => setPreviewImageUrl(url)}
+                              onLoad={() => {
+                                if (isNearBottomRef.current) {
+                                  scrollToBottom('smooth');
+                                }
+                              }}
                             />
                             <div className="absolute top-2 left-2 bg-black/75 backdrop-blur-sm text-[10px] text-white/90 px-2 py-0.5 rounded-full border border-white/10 font-medium flex items-center gap-1.5">
                               {url.includes('camera') ? (
