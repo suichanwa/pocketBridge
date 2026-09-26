@@ -36,6 +36,7 @@ import {
   Volume2,
   VolumeX,
   RotateCw,
+  Zap,
 } from 'lucide-react';
 import { MarkdownView } from './MarkdownView.js';
 import type { ChatMessage, ToolCallRecord } from '../../shared/types.js';
@@ -47,6 +48,11 @@ interface CommandOption {
 }
 
 const AVAILABLE_COMMANDS: CommandOption[] = [
+  {
+    name: '/caveman',
+    description: 'Toggle Caveman Ultra mode to cut token usage (terse, zero fluff, highest token savings)',
+    icon: Zap,
+  },
   {
     name: '/model',
     description: 'Inspect or switch active AI model (/model pro, /model flash, /model <name>)',
@@ -304,6 +310,12 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
     }
     if (cmdName.trim() === '/usage') {
       onSendMessage('/usage');
+      setInputText('');
+      setShowCommands(false);
+      return;
+    }
+    if (cmdName.trim() === '/caveman') {
+      onSendMessage('/caveman');
       setInputText('');
       setShowCommands(false);
       return;

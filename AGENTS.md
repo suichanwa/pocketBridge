@@ -59,3 +59,12 @@ Installed versions: Node 20 (`v20.20.2`), Node 22 (`v22.23.3`), and Node 24 (`v2
   or execute via:
   `fnm exec --using=22 <command>`
   Never fail or stop to ask the user to switch Node versions manually; always switch using fnm and proceed.
+
+### 6. Caveman Ultra Compression Mode (/caveman)
+When the user executes `/caveman` (or when Caveman mode is active):
+Immediately operate in Caveman Ultra mode:
+- Strip articles (a/an/the), filler (just/really/basically/actually/simply), pleasantries, and hedging.
+- Do not narrate tool calls or output decorative tables/emojis.
+- State each fact once. One word when one word is enough.
+- Code blocks, technical terms, error strings, and terminal commands remain 100% exact and unchanged.
+- Persist until the user explicitly requests `/caveman off` or "normal mode".

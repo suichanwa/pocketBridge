@@ -245,6 +245,7 @@ export class PocketAgent {
   private apiKey: string;
   private modelTier: 'flash' | 'pro';
   private customAgyModel: string = 'gemini-3.8-flash-high';
+  private cavemanMode: 'off' | 'lite' | 'full' | 'ultra' = 'off';
   private metrics: SessionMetrics = {
     startTime: Date.now(),
     totalRequests: 0,
@@ -310,6 +311,61 @@ export class PocketAgent {
     agyConversationId?: string
   ): Promise<string> {
     const trimmed = userText.trim();
+
+    // Check for /caveman command
+    if (trimmed === '/caveman' || trimmed.startsWith('/caveman ') || trimmed.toLowerCase() === 'caveman mode') {
+      const arg = trimmed.startsWith('/caveman ') ? trimmed.substring(9).trim().toLowerCase() : '';
+      if (arg === 'off' || arg === 'stop' || arg === 'disable' || arg === 'normal') {
+        this.cavemanMode = 'off';
+        const offMsg = '**Caveman mode disabled**\n\nStandard conversational output restored.';
+        callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: offMsg });
+        return offMsg;
+      }
+
+      // Default to ultra when typing /caveman without arguments
+      const level = (arg === 'lite' || arg === 'full' || arg === 'ultra') ? arg : 'ultra';
+      this.cavemanMode = level;
+
+      // Forward /caveman command to AGY session if active
+      if (this.modelTier === 'pro') {
+        const logId = `term-${Date.now()}`;
+        const continues = history.length > 0;
+        const modelName = this.customAgyModel;
+        const resumeFlag = agyConversationId
+          ? `--conversation ${agyConversationId} `
+          : (continues ? '-c ' : '');
+
+        callbacks.onTerminalLog({
+          id: logId,
+          command: `agy --model ${modelName} --dangerously-skip-permissions ${resumeFlag}-p "/caveman ${level}"`,
+          output: '',
+          status: 'running',
+          timestamp: Date.now(),
+        });
+
+        await runAgyTask({
+          prompt: `/caveman ${level}`,
+          model: modelName,
+          conversationId: agyConversationId,
+          continueSession: !agyConversationId && continues,
+          onChunk: (chunk) => callbacks.onTerminalChunk(logId, chunk),
+        });
+
+        callbacks.onTerminalChunk(logId, '', 0);
+      }
+
+      const activeMsg = [
+        `**Caveman ${level.toUpperCase()} Mode Active**`,
+        ``,
+        `Compression enabled. Stripping filler, hedging, articles, pleasantries.`,
+        `Maximum token savings. Code blocks and technical accuracy exact.`,
+        ``,
+        `*Type \`/caveman off\` to return to standard mode.*`,
+      ].join('\n');
+
+      callbacks.onUpdateMessage(assistantMessageId, { status: 'done', content: activeMsg });
+      return activeMsg;
+    }
 
     // 1. Check for /model command
     if (trimmed === '/model' || trimmed.startsWith('/model ')) {
@@ -853,8 +909,12 @@ export class PocketAgent {
         content: `Thinking with Antigravity (${modelName})...`,
       });
 
+      const promptToSend = this.cavemanMode !== 'off'
+        ? `[Caveman ${this.cavemanMode}: terse smart caveman style, max compression, zero filler/articles/hedging/pleasantries. Shortest decisive output.]\n\n${trimmed}`
+        : trimmed;
+
       const res = await runAgyTask({
-        prompt: trimmed,
+        prompt: promptToSend,
         model: modelName,
         conversationId: agyConversationId,
         continueSession: !agyConversationId && continues,
@@ -958,6 +1018,7 @@ Guidelines:
 4. Format output cleanly in Markdown.
 5. Execute tests and check exit codes carefully.
 6. If a task requires deep code editing, project building, fixing tricky bugs, or writing files across repositories, delegate it via run_agy_task!
+${this.cavemanMode !== 'off' ? `\nCAVEMAN ${this.cavemanMode.toUpperCase()} MODE ACTIVE: Respond terse like smart caveman. Drop articles (a/an/the), filler, hedging, pleasantries. Zero fluff. Keep technical terms, code, and errors exact. One word when one word enough.` : ''}
 `;
 
       const candidateModels = [
