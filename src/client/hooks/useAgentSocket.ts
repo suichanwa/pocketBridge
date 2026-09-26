@@ -93,7 +93,38 @@ export function useAgentSocket() {
 
           case 'chat_update':
             setMessages((prev) =>
-              prev.map((m) => (m.id === msg.messageId ? { ...m, ...msg.partial } : m))
+              prev.map((m) => {
+                if (m.id === msg.messageId) {
+                  const updated = { ...m, ...msg.partial };
+                  if (m.status === 'thinking' && (updated.status === 'done' || updated.status === 'error')) {
+                    if (
+                      typeof window !== 'undefined' &&
+                      'Notification' in window &&
+                      Notification.permission === 'granted' &&
+                      (!document.hasFocus() || document.hidden)
+                    ) {
+                      try {
+                        const clean = (updated.content || '').replace(/[#*`_]/g, '').trim();
+                        const snippet = clean.length > 100 ? `${clean.slice(0, 100)}...` : clean;
+                        new Notification(
+                          updated.status === 'done' ? 'PocketBridge Task Completed' : 'PocketBridge Task Failed',
+                          {
+                            body: snippet || 'Background task finished.',
+                            icon: '/vite.svg',
+                          }
+                        );
+                        if ('vibrate' in navigator) {
+                          navigator.vibrate([100, 50, 100]);
+                        }
+                      } catch (err) {
+                        console.error('Notification error:', err);
+                      }
+                    }
+                  }
+                  return updated;
+                }
+                return m;
+              })
             );
             if (msg.partial.screenshotUrl) {
               setLatestScreenshot(msg.partial.screenshotUrl);

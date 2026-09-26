@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useAgentSocket } from '@/hooks/useAgentSocket.js';
 import { Header } from '@/components/Header.js';
 import { ChatSidebar } from '@/components/ChatSidebar.js';
+import { FileManager } from '@/components/FileManager.js';
 import { ChatFeed } from '@/components/ChatFeed.js';
 import { ScreenViewer } from '@/components/ScreenViewer.js';
 import { TerminalLog } from '@/components/TerminalLog.js';
@@ -47,6 +48,7 @@ export function App() {
 
   const [activeTab, setActiveTab] = useState<'chat' | 'screen' | 'terminal'>('chat');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [isCapturing, setIsCapturing] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
@@ -271,6 +273,8 @@ export function App() {
         status={status}
         isConnected={isConnected}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenFiles={() => setFilesOpen((prev) => !prev)}
+        isFilesOpen={filesOpen}
         onClearChat={clearChat}
         onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
         isSidebarOpen={sidebarOpen}
@@ -543,6 +547,12 @@ export function App() {
       </div>
         </div>
       </div>
+
+      {/* File Explorer & APK Downloader */}
+      <FileManager
+        isOpen={filesOpen}
+        onClose={() => setFilesOpen(false)}
+      />
 
       {/* Settings Modal */}
       <SettingsModal

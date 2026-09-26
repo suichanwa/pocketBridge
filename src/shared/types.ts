@@ -52,6 +52,7 @@ export interface SystemStatus {
   pinRequired: boolean;
   modelTier: 'flash' | 'pro';
   activeModel?: string;
+  telegramNotifyOnComplete?: boolean;
 }
 
 export interface ConfigSettings {
@@ -61,6 +62,16 @@ export interface ConfigSettings {
   accessPin?: string;
   telegramApiId?: string;
   telegramApiHash?: string;
+  telegramNotifyOnComplete?: boolean;
+}
+
+export interface FileItem {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  size: number;
+  mtime: number;
+  extension?: string;
 }
 
 export interface ChatSessionMeta {

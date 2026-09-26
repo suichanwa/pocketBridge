@@ -10,7 +10,22 @@ import {
 import { Button } from '@/components/ui/button.js';
 import { Input } from '@/components/ui/input.js';
 import { Badge } from '@/components/ui/badge.js';
-import { Key, Lock, Send, Check, ExternalLink, Copy, Sparkles, ShieldCheck, Smartphone, Brain, Zap } from 'lucide-react';
+import {
+  Key,
+  Lock,
+  Send,
+  Check,
+  ExternalLink,
+  Copy,
+  Sparkles,
+  ShieldCheck,
+  Smartphone,
+  Brain,
+  Zap,
+  Bell,
+  BellRing,
+  BellOff,
+} from 'lucide-react';
 import type { SystemStatus, ConfigSettings } from '../../shared/types.js';
 
 interface SettingsModalProps {
@@ -31,6 +46,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [accessPin, setAccessPin] = useState(localStorage.getItem('pb_pin') || '');
   const [tgId, setTgId] = useState('');
   const [tgHash, setTgHash] = useState('');
+  const [telegramNotify, setTelegramNotify] = useState(Boolean(status?.telegramNotifyOnComplete));
+  const [notifPermission, setNotifPermission] = useState<string>(
+    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'
+  );
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [copiedTailscale, setCopiedTailscale] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
@@ -41,8 +60,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       if (status?.modelTier) {
         setModelTier(status.modelTier);
       }
+      if (status?.telegramNotifyOnComplete !== undefined) {
+        setTelegramNotify(status.telegramNotifyOnComplete);
+      }
+      if (typeof window !== 'undefined' && 'Notification' in window) {
+        setNotifPermission(Notification.permission);
+      }
     }
-  }, [open, status?.modelTier]);
+  }, [open, status?.modelTier, status?.telegramNotifyOnComplete]);
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,12 +83,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       accessPin: accessPin || undefined,
       telegramApiId: tgId || undefined,
       telegramApiHash: tgHash || undefined,
+      telegramNotifyOnComplete: telegramNotify,
     });
 
     setIsSaved(true);
     setTimeout(() => {
       onOpenChange(false);
     }, 1000);
+  };
+
+  const requestBrowserNotification = async () => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      try {
+        const perm = await Notification.requestPermission();
+        setNotifPermission(perm);
+      } catch (err) {
+        console.error('Failed to request notification permission:', err);
+      }
+    }
   };
 
   const copyConnectionUrl = () => {
@@ -266,6 +303,63 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 value={tgHash}
                 onChange={(e) => setTgHash(e.target.value)}
                 className="h-8 text-xs font-mono bg-secondary/50 border-border/70"
+              />
+            </div>
+          </div>
+
+          {/* Task Completion Alerts */}
+          <div className="space-y-2 pt-2 border-t border-border/40">
+            <label className="text-xs font-semibold flex items-center gap-1.5 text-foreground">
+              <Bell className="w-3.5 h-3.5 text-sky-400" />
+              Task Completion Alerts
+            </label>
+
+            {/* Browser Push Notification */}
+            <div className="flex items-center justify-between p-2 rounded-xl bg-secondary/30 border border-border/50 text-xs">
+              <div>
+                <span className="font-medium text-foreground block">Browser Web Push</span>
+                <span className="text-[10px] text-muted-foreground block">
+                  Alert when phone is locked or browser is in background
+                </span>
+              </div>
+              {notifPermission === 'granted' ? (
+                <Badge variant="outline" className="text-[10px] py-0.5 px-2 border-emerald-500/40 text-emerald-400 flex items-center gap-1">
+                  <BellRing className="w-3 h-3" />
+                  Active
+                </Badge>
+              ) : notifPermission === 'denied' ? (
+                <Badge variant="outline" className="text-[10px] py-0.5 px-2 border-destructive/40 text-destructive flex items-center gap-1">
+                  <BellOff className="w-3 h-3" />
+                  Blocked
+                </Badge>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={requestBrowserNotification}
+                  className="h-7 w-7 border-border/70 text-foreground hover:bg-primary/10"
+                  title="Enable browser notifications"
+                >
+                  <Bell className="w-3.5 h-3.5" />
+                </Button>
+              )}
+            </div>
+
+            {/* Telegram Completion Alert */}
+            <div className="flex items-center justify-between p-2 rounded-xl bg-secondary/30 border border-border/50 text-xs">
+              <div>
+                <span className="font-medium text-foreground block">Telegram Saved Messages Alert</span>
+                <span className="text-[10px] text-muted-foreground block">
+                  Send completion status to your Telegram when builds finish
+                </span>
+              </div>
+              <input
+                type="checkbox"
+                checked={telegramNotify}
+                onChange={(e) => setTelegramNotify(e.target.checked)}
+                className="w-4 h-4 rounded border-border accent-primary cursor-pointer shrink-0"
+                title="Toggle Telegram completion notifications"
               />
             </div>
           </div>

@@ -14,6 +14,7 @@ import {
   Camera,
   Terminal,
   PanelLeft,
+  HardDrive,
 } from 'lucide-react';
 import type { SystemStatus } from '../../shared/types.js';
 
@@ -21,6 +22,8 @@ interface HeaderProps {
   status: SystemStatus | null;
   isConnected: boolean;
   onOpenSettings: () => void;
+  onOpenFiles?: () => void;
+  isFilesOpen?: boolean;
   onClearChat?: () => void;
   onToggleSidebar?: () => void;
   isSidebarOpen?: boolean;
@@ -36,6 +39,8 @@ export const Header: React.FC<HeaderProps> = ({
   status,
   isConnected,
   onOpenSettings,
+  onOpenFiles,
+  isFilesOpen,
   onClearChat,
   onToggleSidebar,
   isSidebarOpen,
@@ -143,6 +148,21 @@ export const Header: React.FC<HeaderProps> = ({
                 <Terminal className="w-3.5 h-3.5" />
               </Button>
             </div>
+          )}
+
+          {/* Files & APKs Trigger */}
+          {onOpenFiles && (
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={onOpenFiles}
+              className={`h-8 w-8 sm:h-9 sm:w-9 border-border/70 hover:bg-secondary/60 text-muted-foreground ${
+                isFilesOpen ? 'text-primary border-primary/40 bg-primary/10' : ''
+              }`}
+              title="Files & APKs Downloader"
+            >
+              <HardDrive className="w-4 h-4" />
+            </Button>
           )}
 
           {/* Clear Chat Icon */}

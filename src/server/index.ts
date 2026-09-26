@@ -2,16 +2,19 @@ import Fastify from 'fastify';
 import fastifyWebsocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
 import fastifyCors from '@fastify/cors';
+import fastifyMultipart from '@fastify/multipart';
 import dotenv from 'dotenv';
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, createReadStream, createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 import os from 'node:os';
 import { execa } from 'execa';
 import { PocketAgent } from './agent.js';
 import { takeMacScreenshot } from './tools/screenshot.js';
 import { takeCameraPhoto } from './tools/camera.js';
 import { executeShellCommand } from './tools/shell.js';
+import { sendTelegramMessage, isTelegramConfigured } from './tools/telegram.js';
 import type {
   ChatMessage,
   TerminalLog,
@@ -31,6 +34,11 @@ import {
   listLocalAgySessions,
   importOrResumeAgySession,
 } from './sessions.js';
+import {
+  listDirectoryContents,
+  resolveSafePath,
+  deleteFileSystemItem,
+} from './files.js';
 
 // Load .env
 dotenv.config();
@@ -207,7 +215,30 @@ async function getLiveSystemStatus(): Promise<SystemStatus> {
     pinRequired: Boolean(process.env.ACCESS_PIN && process.env.ACCESS_PIN.trim().length > 0),
     modelTier: agent.getModelTier(),
     activeModel: agent.getActiveModel(),
+    telegramNotifyOnComplete: process.env.TELEGRAM_NOTIFY_ON_COMPLETE === 'true',
   };
+}
+
+/**
+ * Sends a task completion notification to Telegram "Saved Messages" if enabled.
+ */
+async function notifyTaskCompleteIfEnabled(promptText: string, status: 'done' | 'error', details?: string) {
+  if (process.env.TELEGRAM_NOTIFY_ON_COMPLETE !== 'true') return;
+  if (!isTelegramConfigured()) return;
+
+  const snippet = promptText.length > 80 ? `${promptText.slice(0, 80)}...` : promptText;
+  const timeStr = new Date().toLocaleTimeString();
+  const statusStr = status === 'done' ? 'Completed Successfully' : 'Encountered Error';
+  const msg = `[PocketBridge] Task ${statusStr}\n\nTask: "${snippet}"\nStatus: ${status.toUpperCase()}\nTime: ${timeStr}${details ? `\n\nOutput:\n${details.slice(0, 160)}` : ''}`;
+
+  try {
+    await sendTelegramMessage({
+      recipient: 'me',
+      message: msg,
+    });
+  } catch (err) {
+    console.error('Failed to dispatch Telegram completion notification:', err);
+  }
 }
 
 async function startServer() {
@@ -237,6 +268,12 @@ async function startServer() {
 
   await app.register(fastifyCors, {
     origin: true,
+  });
+
+  await app.register(fastifyMultipart, {
+    limits: {
+      fileSize: 500 * 1024 * 1024, // 500MB
+    },
   });
 
   await app.register(fastifyWebsocket);
@@ -390,6 +427,74 @@ async function startServer() {
     }
   });
 
+  // File Explorer & Download Routes
+  app.get('/api/files', async (req, reply) => {
+    const query = req.query as { path?: string };
+    try {
+      return await listDirectoryContents(query.path);
+    } catch (err: any) {
+      reply.status(400);
+      return { error: err?.message || 'Failed to list directory' };
+    }
+  });
+
+  app.get('/api/files/download', async (req, reply) => {
+    const query = req.query as { path?: string };
+    if (!query.path) {
+      reply.status(400);
+      return { error: 'Path is required' };
+    }
+    const safePath = resolveSafePath(query.path);
+    if (!existsSync(safePath)) {
+      reply.status(404);
+      return { error: 'File not found' };
+    }
+    const stat = await fs.stat(safePath);
+    if (stat.isDirectory()) {
+      reply.status(400);
+      return { error: 'Cannot download a directory directly' };
+    }
+    const filename = path.basename(safePath);
+    reply.header('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+    reply.header('Content-Type', 'application/octet-stream');
+    reply.header('Content-Length', stat.size);
+    return reply.send(createReadStream(safePath));
+  });
+
+  app.post('/api/files/upload', async (req, reply) => {
+    try {
+      const query = req.query as { path?: string };
+      const targetDir = resolveSafePath(query.path);
+      const data = await req.file();
+      if (!data) {
+        reply.status(400);
+        return { error: 'No file received' };
+      }
+      const safeFilename = path.basename(data.filename);
+      const destPath = path.join(targetDir, safeFilename);
+      await pipeline(data.file, createWriteStream(destPath));
+      return { success: true, filename: safeFilename, path: destPath };
+    } catch (err: any) {
+      reply.status(500);
+      return { error: err?.message || 'File upload failed' };
+    }
+  });
+
+  app.delete('/api/files', async (req, reply) => {
+    const query = req.query as { path?: string };
+    if (!query.path) {
+      reply.status(400);
+      return { error: 'Path is required' };
+    }
+    try {
+      const success = await deleteFileSystemItem(query.path);
+      return { success };
+    } catch (err: any) {
+      reply.status(400);
+      return { error: err?.message };
+    }
+  });
+
   app.post('/api/action/screenshot', async (req, reply) => {
     try {
       const shot = await takeMacScreenshot();
@@ -443,6 +548,9 @@ async function startServer() {
     if (body.telegramApiHash !== undefined) {
       process.env.TELEGRAM_API_HASH = body.telegramApiHash;
     }
+    if (body.telegramNotifyOnComplete !== undefined) {
+      process.env.TELEGRAM_NOTIFY_ON_COMPLETE = body.telegramNotifyOnComplete ? 'true' : 'false';
+    }
 
     // Persist to .env
     try {
@@ -456,6 +564,7 @@ ACCESS_PIN=${process.env.ACCESS_PIN || ''}
 TELEGRAM_API_ID=${process.env.TELEGRAM_API_ID || ''}
 TELEGRAM_API_HASH=${process.env.TELEGRAM_API_HASH || ''}
 TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
+TELEGRAM_NOTIFY_ON_COMPLETE=${process.env.TELEGRAM_NOTIFY_ON_COMPLETE || 'false'}
 `;
       await fs.writeFile(path.resolve(process.cwd(), '.env'), envContent, 'utf-8');
     } catch (err) {
@@ -670,6 +779,7 @@ TELEGRAM_SESSION=${process.env.TELEGRAM_SESSION || ''}
                 broadcast({ type: 'chat_update', messageId: msgId, partial });
                 if (partial.status === 'done' || partial.status === 'error') {
                   savePocketSession(activeSession).catch(console.error);
+                  notifyTaskCompleteIfEnabled(userText, partial.status, target?.content || partial.content);
                 }
               },
               onTerminalLog: (log) => {
