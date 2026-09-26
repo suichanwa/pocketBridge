@@ -226,16 +226,17 @@ export function useAgentSocket() {
     }
   }, []);
 
-  const sendMessage = useCallback((text: string) => {
+  const sendMessage = useCallback((text: string, images?: string[]) => {
     const trimmed = text.trim();
     const lower = trimmed.toLowerCase();
     if (
-      lower === '/clear' ||
-      lower === 'clear' ||
-      lower === '/cls' ||
-      lower === '/clean' ||
-      lower === '/reset' ||
-      lower.startsWith('/clear ')
+      !images?.length &&
+      (lower === '/clear' ||
+        lower === 'clear' ||
+        lower === '/cls' ||
+        lower === '/clean' ||
+        lower === '/reset' ||
+        lower.startsWith('/clear '))
     ) {
       clearChat();
       return;
@@ -246,6 +247,7 @@ export function useAgentSocket() {
         JSON.stringify({
           type: 'chat_send',
           text,
+          images: images && images.length > 0 ? images : undefined,
           pin: savedPinRef.current,
         } as ClientMessage)
       );

@@ -37,6 +37,7 @@ import {
   VolumeX,
   RotateCw,
   Zap,
+  ImagePlus,
 } from 'lucide-react';
 import { MarkdownView } from './MarkdownView.js';
 import type { ChatMessage, ToolCallRecord } from '../../shared/types.js';
@@ -142,7 +143,7 @@ const AVAILABLE_COMMANDS: CommandOption[] = [
 
 interface ChatFeedProps {
   messages: ChatMessage[];
-  onSendMessage: (text: string) => void;
+  onSendMessage: (text: string, images?: string[]) => void;
   onClearChat?: () => void;
   disabled?: boolean;
 }
@@ -154,6 +155,8 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
   disabled,
 }) => {
   const [inputText, setInputText] = useState('');
+  const [selectedImage, setSelectedImage] = useState<{ file: File; previewUrl: string } | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [selectedCmdIndex, setSelectedCmdIndex] = useState(0);
@@ -163,6 +166,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
   const commandItemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
@@ -196,6 +200,14 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
       });
     }
   }, [currentFirstMsgId]);
+
+  useEffect(() => {
+    return () => {
+      if (selectedImage) {
+        URL.revokeObjectURL(selectedImage.previewUrl);
+      }
+    };
+  }, [selectedImage]);
 
   const loadMoreMessages = () => {
     const container = scrollContainerRef.current;
@@ -342,18 +354,66 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleImageSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file (PNG, JPG, WebP, etc.)');
+      return;
+    }
+    if (selectedImage) {
+      URL.revokeObjectURL(selectedImage.previewUrl);
+    }
+    const previewUrl = URL.createObjectURL(file);
+    setSelectedImage({ file, previewUrl });
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleClearSelectedImage = () => {
+    if (selectedImage) {
+      URL.revokeObjectURL(selectedImage.previewUrl);
+      setSelectedImage(null);
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        const file = items[i].getAsFile();
+        if (file) {
+          e.preventDefault();
+          if (selectedImage) {
+            URL.revokeObjectURL(selectedImage.previewUrl);
+          }
+          const previewUrl = URL.createObjectURL(file);
+          setSelectedImage({ file, previewUrl });
+          break;
+        }
+      }
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const text = inputText.trim();
-    if (!text || disabled) return;
+    if ((!text && !selectedImage) || disabled || isUploading) return;
+
     const lower = text.toLowerCase();
     if (
-      lower === '/clear' ||
-      lower === 'clear' ||
-      lower === '/cls' ||
-      lower === '/clean' ||
-      lower === '/reset' ||
-      lower.startsWith('/clear ')
+      !selectedImage &&
+      (lower === '/clear' ||
+        lower === 'clear' ||
+        lower === '/cls' ||
+        lower === '/clean' ||
+        lower === '/reset' ||
+        lower.startsWith('/clear '))
     ) {
       onClearChat?.();
       onSendMessage('/clear');
@@ -361,7 +421,44 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
       setShowCommands(false);
       return;
     }
-    onSendMessage(text);
+
+    let uploadedImageUrl: string | undefined;
+
+    if (selectedImage) {
+      setIsUploading(true);
+      try {
+        const formData = new FormData();
+        formData.append('file', selectedImage.file);
+        const res = await fetch('/api/chat/upload', {
+          method: 'POST',
+          body: formData,
+        });
+        if (!res.ok) {
+          throw new Error(`Upload failed with status ${res.status}`);
+        }
+        const data = await res.json();
+        if (data.url) {
+          uploadedImageUrl = data.url;
+        } else {
+          throw new Error(data.error || 'Server did not return image URL');
+        }
+      } catch (err: any) {
+        console.error('Failed to upload image:', err);
+        alert(`Failed to upload photo: ${err?.message || 'Network error'}`);
+        setIsUploading(false);
+        return;
+      } finally {
+        setIsUploading(false);
+      }
+    }
+
+    if (selectedImage) {
+      URL.revokeObjectURL(selectedImage.previewUrl);
+      setSelectedImage(null);
+    }
+
+    const messageText = text || (uploadedImageUrl ? 'Attached photo' : '');
+    onSendMessage(messageText, uploadedImageUrl ? [uploadedImageUrl] : undefined);
     setInputText('');
     setShowCommands(false);
   };
@@ -687,6 +784,11 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                                   <Camera className="w-3 h-3 text-sky-400" />
                                   <span>Webcam Photo</span>
                                 </>
+                              ) : url.includes('upload') ? (
+                                <>
+                                  <ImagePlus className="w-3 h-3 text-emerald-400" />
+                                  <span>Attached Photo</span>
+                                </>
                               ) : (
                                 <>
                                   <Monitor className="w-3 h-3 text-sky-400" />
@@ -798,15 +900,85 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
 
       {/* Bottom Input Area */}
       <div className="border-t border-border/80 bg-background/95 backdrop-blur-md p-2.5 sm:p-4">
-        <form onSubmit={handleSubmit} className="flex items-center gap-2">
+        {/* Selected image preview */}
+        {selectedImage && (
+          <div className="mb-2 flex items-center justify-between bg-secondary/60 border border-border/70 rounded-xl p-1.5 pr-2.5 max-w-sm animate-in fade-in slide-in-from-bottom-1 duration-150">
+            <div className="flex items-center gap-2 overflow-hidden">
+              <div className="relative w-11 h-11 shrink-0 rounded-lg overflow-hidden border border-border/60 bg-black/40">
+                <img
+                  src={selectedImage.previewUrl}
+                  alt="Preview"
+                  className="w-full h-full object-cover"
+                />
+                {isUploading && (
+                  <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-col min-w-0 pr-1">
+                <span className="text-xs font-mono truncate text-foreground font-medium">
+                  {selectedImage.file.name}
+                </span>
+                <span className="text-[10px] text-muted-foreground">
+                  {(selectedImage.file.size / 1024).toFixed(0)} KB
+                </span>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={handleClearSelectedImage}
+              disabled={isUploading}
+              title="Remove photo"
+              className="h-7 w-7 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+            >
+              <X className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="flex items-center gap-1.5 sm:gap-2">
+          {/* Photo attachment button on the left side of the input bar */}
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={disabled || isUploading}
+            title="Attach photo"
+            className="h-10 w-10 shrink-0 rounded-xl bg-secondary/70 hover:bg-secondary text-muted-foreground hover:text-foreground border-border/60 transition-colors"
+          >
+            {isUploading ? (
+              <Loader2 className="w-4 h-4 animate-spin text-primary" />
+            ) : (
+              <ImagePlus className="w-4 h-4" />
+            )}
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleImageSelected}
+          />
+
           <Input
             ref={inputRef}
             type="text"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isListening ? 'Listening to voice...' : "Type a message or '/' for commands..."}
-            disabled={disabled}
+            onPaste={handlePaste}
+            placeholder={
+              isListening
+                ? 'Listening to voice...'
+                : selectedImage
+                ? 'Ask a question or caption for this photo...'
+                : "Type a message or '/' for commands..."
+            }
+            disabled={disabled || isUploading}
             className={`flex-1 bg-secondary/50 border-border/60 rounded-xl px-3.5 py-2 h-10 text-sm focus-visible:ring-1 focus-visible:ring-primary font-normal ${
               isListening ? 'ring-2 ring-rose-500 bg-rose-500/10 placeholder:text-rose-400' : ''
             }`}
@@ -817,7 +989,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
               variant="outline"
               size="icon"
               onClick={onClearChat}
-              disabled={disabled}
+              disabled={disabled || isUploading}
               title="Clear Chat (/clear)"
               className="h-10 w-10 shrink-0 rounded-xl bg-secondary/70 hover:bg-destructive/15 hover:text-destructive hover:border-destructive/40 text-muted-foreground border-border/60 transition-colors"
             >
@@ -829,7 +1001,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
             variant="outline"
             size="icon"
             onClick={toggleListening}
-            disabled={disabled}
+            disabled={disabled || isUploading}
             title={isListening ? 'Stop listening' : 'Voice Input'}
             className={`h-10 w-10 shrink-0 rounded-xl transition-all ${
               isListening
@@ -842,11 +1014,15 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
           <Button
             type="submit"
             size="icon"
-            disabled={!inputText.trim() || disabled}
+            disabled={(!inputText.trim() && !selectedImage) || disabled || isUploading}
             title="Send"
             className="h-10 w-10 shrink-0 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
           >
-            <Send className="w-4 h-4" />
+            {isUploading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Send className="w-4 h-4" />
+            )}
           </Button>
         </form>
       </div>

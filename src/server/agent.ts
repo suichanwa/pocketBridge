@@ -17,7 +17,11 @@ import {
   getDisplayDimensions,
 } from './tools/cursor.js';
 import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs/promises';
 import type { ChatMessage, ToolCallRecord, TerminalLog } from '../shared/types.js';
+
+const CAPTURES_DIR = path.resolve(process.cwd(), 'captures');
 
 export interface SessionMetrics {
   startTime: number;
@@ -308,7 +312,8 @@ export class PocketAgent {
     history: ChatMessage[],
     assistantMessageId: string,
     callbacks: AgentCallbacks,
-    agyConversationId?: string
+    agyConversationId?: string,
+    attachedImages?: string[]
   ): Promise<string> {
     const trimmed = userText.trim();
 
@@ -693,19 +698,32 @@ export class PocketAgent {
     // 3.5. Natural Language Compound Handlers (Telegram, Camera, Screenshots)
     // Prevents external LLM safety refusals on direct Mac hardware/messaging actions
     const lowerTrimmed = trimmed.toLowerCase();
+    const hasAttachedImages = Boolean(attachedImages && attachedImages.length > 0);
 
     // Typo-tolerant screenshot detection:
     // Matches: screenhot, screnshot, scerenshot, screenshot, screen, screencap, screen capture, desktop, /screneshot, /screenshot, /screen, /shot
-    const wantsScreenshot =
+    let wantsScreenshot =
       /(?:screen\s*hot|scre*n\s*shot|scerenshot|screenshot|screen\s*cap|screen\s*capture|desktop\s*shot|desktop\s*capture|\/scre*n|\/shot)/i.test(trimmed) ||
       /(?:capture|take|grab|snap|send).*(?:screen|desktop|display)/i.test(trimmed);
 
     // Typo-tolerant photo / webcam detection:
     // Matches: photo, foto, picture, pic, webcam, camera, facetime, /camera, /photo, /pic
     const hasNegativeWebcam = /not\s+(?:a\s+)?(?:web\s*cam|camera|photo|pic)/i.test(trimmed);
-    const wantsPhoto =
+    let wantsPhoto =
       !hasNegativeWebcam &&
       /(?:photo|foto|picture|\bpic\b|webcam|camera|facetime|\bcam\b|\/camera|\/photo)/i.test(trimmed);
+
+    // If the user attached photo(s) and did not explicitly ask for a new capture,
+    // do not trigger webcam or screenshot capture; instead let the AI inspect the attached photo
+    if (hasAttachedImages) {
+      const explicitNewCapture =
+        /^\/(?:camera|photo|screenshot|shot)\b/i.test(trimmed) ||
+        /(?:take|snap|grab)\s+(?:a\s+)?(?:new\s+)?(?:photo|pic|camera|picture|screenshot|screen)/i.test(trimmed);
+      if (!explicitNewCapture) {
+        wantsPhoto = false;
+        wantsScreenshot = false;
+      }
+    }
 
     // Telegram recipient detection:
     // 1. In current message: @username, 'me', or phone number
@@ -750,6 +768,7 @@ export class PocketAgent {
         detectedRecipient &&
           (wantsScreenshot ||
             wantsPhoto ||
+            hasAttachedImages ||
             /send|forward|deliver|post|message/i.test(trimmed) ||
             /^(?:no\b|not\b|just\b|a\s+screen|a\s+photo)/i.test(trimmed))
       );
@@ -758,17 +777,27 @@ export class PocketAgent {
       this.recordMetric('telegramMessages');
       callbacks.onUpdateMessage(assistantMessageId, {
         status: 'thinking',
-        content: `Capturing fresh media and sending to Telegram \`${detectedRecipient}\`...`,
+        content: `Preparing media and sending to Telegram \`${detectedRecipient}\`...`,
       });
 
       const mediaPathsToSend: string[] = [];
       const mediaUrlsToDisplay: string[] = [];
 
+      // If user provided attached images, include them in Telegram dispatch
+      if (hasAttachedImages && attachedImages) {
+        for (const imgUrl of attachedImages) {
+          const filename = path.basename(imgUrl);
+          const fullPath = path.resolve(CAPTURES_DIR, filename);
+          mediaUrlsToDisplay.push(imgUrl);
+          mediaPathsToSend.push(fullPath);
+        }
+      }
+
       // Determine what fresh captures are needed
       let needPhoto = wantsPhoto;
       let needScreenshot = wantsScreenshot;
-      if (!needPhoto && !needScreenshot) {
-        // If neither was explicitly requested, default to fresh screenshot
+      if (!needPhoto && !needScreenshot && !hasAttachedImages) {
+        // If neither was explicitly requested and no attached images exist, default to fresh screenshot
         needScreenshot = true;
       }
 
@@ -896,9 +925,21 @@ export class PocketAgent {
         ? `--conversation ${agyConversationId} `
         : (continues ? '-c ' : '');
 
+      let rawPrompt = trimmed;
+      if (hasAttachedImages && attachedImages) {
+        const imagePaths = attachedImages.map((img) => {
+          if (img.startsWith('/captures/')) {
+            return path.resolve(CAPTURES_DIR, path.basename(img));
+          }
+          return img;
+        });
+        const imgInstructions = `[User attached ${imagePaths.length} photo(s):\n${imagePaths.map((p) => `- ${p}`).join('\n')}\n(IMPORTANT: Use your view_file tool to view and inspect the image file(s) above so you can read, see, and analyze what the user sent)]\n\n`;
+        rawPrompt = `${imgInstructions}${trimmed || 'Please inspect the attached photo and tell me what you see or assist with it.'}`;
+      }
+
       callbacks.onTerminalLog({
         id: logId,
-        command: `agy --model ${modelName} --dangerously-skip-permissions ${resumeFlag}-p "${trimmed.replace(/"/g, '\\"')}"`,
+        command: `agy --model ${modelName} --dangerously-skip-permissions ${resumeFlag}-p "${rawPrompt.replace(/"/g, '\\"')}"`,
         output: '',
         status: 'running',
         timestamp: Date.now(),
@@ -910,8 +951,8 @@ export class PocketAgent {
       });
 
       const promptToSend = this.cavemanMode !== 'off'
-        ? `[Caveman ${this.cavemanMode}: terse smart caveman style, max compression, zero filler/articles/hedging/pleasantries. Shortest decisive output.]\n\n${trimmed}`
-        : trimmed;
+        ? `[Caveman ${this.cavemanMode}: terse smart caveman style, max compression, zero filler/articles/hedging/pleasantries. Shortest decisive output.]\n\n${rawPrompt}`
+        : rawPrompt;
 
       const res = await runAgyTask({
         prompt: promptToSend,
@@ -981,9 +1022,34 @@ export class PocketAgent {
       }
 
       // Add current user prompt
+      const userParts: any[] = [];
+      if (hasAttachedImages && attachedImages) {
+        for (const imgUrl of attachedImages) {
+          try {
+            const filename = path.basename(imgUrl);
+            const filePath = path.resolve(CAPTURES_DIR, filename);
+            const fileBuffer = await fs.readFile(filePath);
+            const ext = path.extname(filename).toLowerCase();
+            const mimeType =
+              ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+            userParts.push({
+              inlineData: {
+                mimeType,
+                data: fileBuffer.toString('base64'),
+              },
+            });
+          } catch (err) {
+            console.error('Failed to read attached image for Gemini Flash:', err);
+          }
+        }
+      }
+      userParts.push({
+        text: userText || 'Please inspect the attached photo and tell me what you see or assist with it.',
+      });
+
       conversationContents.push({
         role: 'user',
-        parts: [{ text: userText }],
+        parts: userParts,
       });
 
       const systemInstruction = `You are PocketBridge, the autonomous AI assistant running on this Mac laptop.

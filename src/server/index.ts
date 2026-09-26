@@ -461,6 +461,37 @@ async function startServer() {
     return reply.send(createReadStream(safePath));
   });
 
+  app.post('/api/chat/upload', async (req, reply) => {
+    try {
+      const data = await req.file();
+      if (!data) {
+        reply.status(400);
+        return { error: 'No file received' };
+      }
+      const originalExt = path.extname(data.filename) || '.jpg';
+      const cleanExt = originalExt.toLowerCase().match(/\.(jpe?g|png|webp|gif)$/)
+        ? originalExt.toLowerCase()
+        : '.jpg';
+      const safeBasename =
+        path.basename(data.filename, originalExt).replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 40) || 'photo';
+      const safeFilename = `upload-${Date.now()}-${safeBasename}${cleanExt}`;
+      const destPath = path.join(CAPTURES_DIR, safeFilename);
+
+      await pipeline(data.file, createWriteStream(destPath));
+
+      const publicUrl = `/captures/${safeFilename}`;
+      return {
+        success: true,
+        url: publicUrl,
+        path: destPath,
+        filename: safeFilename,
+      };
+    } catch (err: any) {
+      reply.status(500);
+      return { error: err?.message || 'Chat image upload failed' };
+    }
+  });
+
   app.post('/api/files/upload', async (req, reply) => {
     try {
       const query = req.query as { path?: string };
@@ -740,6 +771,10 @@ TELEGRAM_NOTIFY_ON_COMPLETE=${process.env.TELEGRAM_NOTIFY_ON_COMPLETE || 'false'
           }
 
           const userText = rawText;
+          const userImages =
+            Array.isArray(clientMsg.images) && clientMsg.images.length > 0
+              ? clientMsg.images
+              : undefined;
 
           const userMsgId = `user-${Date.now()}`;
           const assistantMsgId = `asst-${Date.now() + 1}`;
@@ -750,6 +785,8 @@ TELEGRAM_NOTIFY_ON_COMPLETE=${process.env.TELEGRAM_NOTIFY_ON_COMPLETE || 'false'
             content: userText,
             timestamp: Date.now(),
             status: 'done',
+            mediaUrls: userImages,
+            screenshotUrl: userImages ? userImages[0] : undefined,
           };
           activeSession.messages.push(userMsg);
           broadcast({ type: 'chat_message', message: userMsg });
@@ -843,7 +880,8 @@ TELEGRAM_NOTIFY_ON_COMPLETE=${process.env.TELEGRAM_NOTIFY_ON_COMPLETE || 'false'
                 broadcast({ type: 'system_status', status: updatedStatus });
               },
             },
-            activeSession.agyConversationId
+            activeSession.agyConversationId,
+            userImages
           );
         } else if (clientMsg.type === 'run_quick_action') {
           if (clientMsg.action === 'screenshot') {
