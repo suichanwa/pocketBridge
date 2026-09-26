@@ -44,6 +44,20 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'saved' | 'gemini'>('saved');
   const [searchQuery, setSearchQuery] = useState('');
+  const [resumingId, setResumingId] = useState<string | null>(null);
+
+  // When active session changes to match resumed AGY session, clear loading state and switch to saved tab
+  React.useEffect(() => {
+    if (resumingId && (activeSessionId === `agy-${resumingId}` || activeSessionId === resumingId)) {
+      setResumingId(null);
+      setActiveTab('saved');
+    }
+  }, [activeSessionId, resumingId]);
+
+  const handleResume = (id: string) => {
+    setResumingId(id);
+    onResumeAgySession(id);
+  };
 
   const filteredSavedSessions = useMemo(() => {
     if (!searchQuery.trim()) return sessions;
@@ -251,12 +265,15 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
                 filteredAgySessions.map((agy) => {
                   const isCurrent =
                     activeSessionId === `agy-${agy.id}` || activeSessionId === agy.id;
+                  const isResumingThis = resumingId === agy.id;
                   return (
                     <div
                       key={agy.id}
-                      onClick={() => onResumeAgySession(agy.id)}
+                      onClick={() => !isResumingThis && handleResume(agy.id)}
                       className={`group relative flex flex-col p-2.5 rounded-lg cursor-pointer transition-all border ${
-                        isCurrent
+                        isResumingThis
+                          ? 'bg-primary/15 border-primary animate-pulse text-foreground shadow-sm'
+                          : isCurrent
                           ? 'bg-primary/10 border-primary/40 text-foreground'
                           : 'border-transparent hover:bg-secondary/40 text-muted-foreground hover:text-foreground'
                       }`}
@@ -268,14 +285,19 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
                         <Button
                           variant="ghost"
                           size="icon"
+                          disabled={isResumingThis}
                           onClick={(e) => {
                             e.stopPropagation();
-                            onResumeAgySession(agy.id);
+                            handleResume(agy.id);
                           }}
                           className="h-6 w-6 hover:bg-primary/10 hover:text-primary text-muted-foreground shrink-0"
-                          title="Resume local conversation"
+                          title={isResumingThis ? 'Resuming session...' : 'Resume local conversation'}
                         >
-                          <ArrowRight className="w-3.5 h-3.5" />
+                          {isResumingThis ? (
+                            <RotateCw className="w-3.5 h-3.5 animate-spin text-primary" />
+                          ) : (
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          )}
                         </Button>
                       </div>
 
@@ -296,10 +318,24 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
                         >
                           {agy.id.slice(0, 8)}
                         </Badge>
-                        <span className="text-[10px] text-primary flex items-center gap-0.5 ml-auto">
-                          <FolderOpen className="w-2.5 h-2.5" />
-                          Resume
-                        </span>
+                        {isResumingThis ? (
+                          <span className="text-[10px] text-primary flex items-center gap-1 ml-auto font-medium">
+                            <RotateCw className="w-2.5 h-2.5 animate-spin" />
+                            Resuming...
+                          </span>
+                        ) : isCurrent ? (
+                          <Badge
+                            variant="outline"
+                            className="text-[9px] py-0 px-1.5 h-4 border-emerald-500/40 text-emerald-400 bg-emerald-500/10 ml-auto font-mono"
+                          >
+                            Active
+                          </Badge>
+                        ) : (
+                          <span className="text-[10px] text-primary flex items-center gap-0.5 ml-auto group-hover:underline">
+                            <FolderOpen className="w-2.5 h-2.5" />
+                            Resume
+                          </span>
+                        )}
                       </div>
                     </div>
                   );

@@ -35,6 +35,7 @@ import {
   MicOff,
   Volume2,
   VolumeX,
+  RotateCw,
 } from 'lucide-react';
 import { MarkdownView } from './MarkdownView.js';
 import type { ChatMessage, ToolCallRecord } from '../../shared/types.js';
@@ -159,13 +160,82 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
   const recognitionRef = useRef<any>(null);
   const commandItemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
+  const PAGE_SIZE = 30;
+  const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const isLoadingMoreRef = useRef(false);
+  const isNearBottomRef = useRef(true);
+  const prevFirstMsgIdRef = useRef<string | null>(null);
+  const prevLenRef = useRef<number>(messages.length);
+
+  const totalCount = messages.length;
+  const hasMore = totalCount > visibleCount;
+  const visibleMessages = hasMore ? messages.slice(-visibleCount) : messages;
+
+  const currentFirstMsgId = messages[0]?.id || null;
+
+  // When conversation session changes or chat is cleared, reset window to PAGE_SIZE
+  useEffect(() => {
+    if (currentFirstMsgId !== prevFirstMsgIdRef.current) {
+      prevFirstMsgIdRef.current = currentFirstMsgId;
+      setVisibleCount(PAGE_SIZE);
+      requestAnimationFrame(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
+      });
+    }
+  }, [currentFirstMsgId]);
+
+  const loadMoreMessages = () => {
+    const container = scrollContainerRef.current;
+    if (!container || !hasMore || isLoadingMoreRef.current) return;
+
+    isLoadingMoreRef.current = true;
+    const prevScrollHeight = container.scrollHeight;
+    const prevScrollTop = container.scrollTop;
+
+    setVisibleCount((prev) => Math.min(totalCount, prev + PAGE_SIZE));
+
+    // Restore scroll position after older messages are prepended to DOM
+    requestAnimationFrame(() => {
+      if (scrollContainerRef.current) {
+        const newScrollHeight = scrollContainerRef.current.scrollHeight;
+        const heightDiff = newScrollHeight - prevScrollHeight;
+        scrollContainerRef.current.scrollTop = prevScrollTop + heightDiff;
+      }
+      setTimeout(() => {
+        isLoadingMoreRef.current = false;
+      }, 50);
+    });
+  };
+
+  const handleScroll = () => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    isNearBottomRef.current = distanceToBottom < 80;
+
+    // Upward infinite scroll trigger when reaching within 60px of top
+    if (container.scrollTop < 60 && hasMore && !isLoadingMoreRef.current) {
+      loadMoreMessages();
+    }
+  };
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    // Only auto-scroll to bottom if new messages were appended and user was near bottom
+    if (messages.length > prevLenRef.current) {
+      if (isNearBottomRef.current) {
+        scrollToBottom();
+      }
+    }
+    prevLenRef.current = messages.length;
+  }, [messages.length]);
 
   // Autocomplete filtering
   const matchingCommands = inputText.startsWith('/')
@@ -379,8 +449,27 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
   return (
     <div className="flex flex-col h-full bg-background overflow-hidden relative">
       {/* Scrollable message thread */}
-      <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-4">
-        {messages.length === 0 ? (
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-4"
+      >
+        {/* Load older messages trigger indicator */}
+        {hasMore && (
+          <div className="flex items-center justify-center py-1">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={loadMoreMessages}
+              className="h-7 w-7 rounded-full border-border/70 hover:bg-secondary text-muted-foreground hover:text-foreground shadow-sm"
+              title={`Load older messages (${totalCount - visibleCount} remaining)`}
+            >
+              <RotateCw className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        )}
+
+        {visibleMessages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full min-h-[280px] text-center p-6 text-muted-foreground select-none">
             <div className="w-12 h-12 rounded-2xl bg-secondary/80 border border-border/60 flex items-center justify-center mb-3 text-muted-foreground shadow-inner">
               <Sparkles className="w-5 h-5 text-primary" />
@@ -403,7 +492,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
             </p>
           </div>
         ) : (
-          messages.map((msg) => {
+          visibleMessages.map((msg) => {
             const isUser = msg.role === 'user';
           return (
             <div

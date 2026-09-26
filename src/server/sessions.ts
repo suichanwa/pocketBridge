@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import type { ChatMessage, TerminalLog, ChatSession, ChatSessionMeta } from '../shared/types.js';
+import type { ChatMessage, TerminalLog, ChatSession, ChatSessionMeta, ToolCallRecord } from '../shared/types.js';
 
 const SESSIONS_DIR = path.resolve(process.cwd(), 'sessions');
 
@@ -227,12 +227,6 @@ export async function importOrResumeAgySession(conversationId: string): Promise<
   await ensureSessionsDir();
   const sessionId = `agy-${conversationId}`;
 
-  // If already imported and cached in sessions/, load it
-  const existing = await loadPocketSession(sessionId);
-  if (existing) {
-    return existing;
-  }
-
   const convPath = path.join(BRAIN_DIR, conversationId);
   const transcriptPath = path.join(convPath, '.system_generated', 'logs', 'transcript.jsonl');
 
@@ -240,11 +234,24 @@ export async function importOrResumeAgySession(conversationId: string): Promise<
     throw new Error(`Local conversation transcript not found at ${transcriptPath}`);
   }
 
+  const stat = await fs.stat(transcriptPath);
+
+  // If already imported and cached in sessions/, only reuse if transcript has not been modified
+  const existing = await loadPocketSession(sessionId);
+  if (
+    existing &&
+    existing.messages &&
+    existing.messages.length > 0 &&
+    (existing.updatedAt || 0) >= stat.mtimeMs
+  ) {
+    return existing;
+  }
+
   const transcriptContent = await fs.readFile(transcriptPath, 'utf-8');
   const lines = transcriptContent.trim().split('\n').filter(Boolean);
   const messages: ChatMessage[] = [];
-  let title = `AGY Session ${conversationId.slice(0, 8)}`;
-  let createdAt = Date.now();
+  let title = existing?.title || `AGY Session ${conversationId.slice(0, 8)}`;
+  let createdAt = existing?.createdAt || stat.mtimeMs;
 
   for (const line of lines) {
     try {
@@ -260,20 +267,45 @@ export async function importOrResumeAgySession(conversationId: string): Promise<
           createdAt = timestamp;
         }
         messages.push({
-          id: `user-${entry.step_index || messages.length}`,
+          id: `user-${entry.step_index ?? messages.length}`,
           role: 'user',
           content: text,
           timestamp,
           status: 'done',
         });
-      } else if (entry.type === 'PLANNER_RESPONSE' && entry.content && entry.content.trim()) {
-        messages.push({
-          id: `asst-${entry.step_index || messages.length}`,
-          role: 'assistant',
-          content: entry.content.trim(),
-          timestamp,
-          status: 'done',
-        });
+      } else if (entry.type === 'PLANNER_RESPONSE') {
+        let content = (entry.content || '').trim();
+        const toolCalls: ToolCallRecord[] = (entry.tool_calls || []).map((tc: any, idx: number) => ({
+          id: `tc-${entry.step_index ?? messages.length}-${idx}`,
+          name: tc.name || 'tool',
+          args: tc.args || {},
+          status: 'success',
+        }));
+
+        if (!content && toolCalls.length > 0) {
+          content = `Executed ${toolCalls.map((t) => t.name).join(', ')}`;
+        }
+
+        // Check if there are attached media files in transcript entry
+        const mediaUrls: string[] = [];
+        if (Array.isArray(entry.media)) {
+          for (const m of entry.media) {
+            if (m.uri) mediaUrls.push(m.uri);
+          }
+        }
+
+        if (content || toolCalls.length > 0 || mediaUrls.length > 0) {
+          messages.push({
+            id: `asst-${entry.step_index ?? messages.length}`,
+            role: 'assistant',
+            content,
+            timestamp,
+            status: 'done',
+            toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+            mediaUrls: mediaUrls.length > 0 ? mediaUrls : undefined,
+            screenshotUrl: mediaUrls.length > 0 ? mediaUrls[0] : undefined,
+          });
+        }
       }
     } catch {}
   }
@@ -288,7 +320,7 @@ export async function importOrResumeAgySession(conversationId: string): Promise<
     isExternalAgy: true,
     agyConversationId: conversationId,
     messages,
-    terminalLogs: [],
+    terminalLogs: existing?.terminalLogs || [],
   };
 
   await savePocketSession(session);

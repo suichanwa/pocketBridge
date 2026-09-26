@@ -292,15 +292,18 @@ export function App() {
           activeSessionId={activeSessionId}
           onSwitchSession={(id) => {
             switchSession(id);
+            setActiveTab('chat');
             if (typeof window !== 'undefined' && window.innerWidth < 1024) setSidebarOpen(false);
           }}
           onNewSession={() => {
             createNewSession();
+            setActiveTab('chat');
             if (typeof window !== 'undefined' && window.innerWidth < 1024) setSidebarOpen(false);
           }}
           onDeleteSession={(id) => deleteSession(id)}
           onResumeAgySession={(id) => {
             resumeAgySession(id);
+            setActiveTab('chat');
             if (typeof window !== 'undefined' && window.innerWidth < 1024) setSidebarOpen(false);
           }}
           onRefreshSessions={refreshSessions}
