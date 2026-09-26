@@ -456,38 +456,6 @@ export class PocketAgent {
       return res.output;
     }
 
-    if (trimmed.startsWith('/screenshot')) {
-      this.recordMetric('screenshots');
-      callbacks.onUpdateMessage(assistantMessageId, {
-        status: 'thinking',
-        content: 'Capturing Mac screen...',
-      });
-      const shot = await takeMacScreenshot();
-      callbacks.onScreenshotReady(shot.publicUrl);
-      callbacks.onUpdateMessage(assistantMessageId, {
-        status: 'done',
-        content: `Captured Mac screen at ${new Date(shot.timestamp).toLocaleTimeString()}.`,
-        screenshotUrl: shot.publicUrl,
-      });
-      return `Captured Mac screen: ${shot.publicUrl}`;
-    }
-
-    if (trimmed.startsWith('/camera') || trimmed.startsWith('/photo')) {
-      this.recordMetric('screenshots');
-      callbacks.onUpdateMessage(assistantMessageId, {
-        status: 'thinking',
-        content: 'Snapping photo from Mac FaceTime camera...',
-      });
-      const photo = await takeCameraPhoto();
-      callbacks.onScreenshotReady(photo.publicUrl);
-      callbacks.onUpdateMessage(assistantMessageId, {
-        status: 'done',
-        content: `**Captured photo from Mac camera** at ${new Date(photo.timestamp).toLocaleTimeString()}:`,
-        screenshotUrl: photo.publicUrl,
-      });
-      return `Captured photo from Mac camera: ${photo.publicUrl}`;
-    }
-
     if (trimmed.startsWith('/git')) {
       this.recordMetric('shellCommands');
       const gitCmd = trimmed.replace(/^\/git\s*/, '') || 'status';
@@ -670,97 +638,133 @@ export class PocketAgent {
     // Prevents external LLM safety refusals on direct Mac hardware/messaging actions
     const lowerTrimmed = trimmed.toLowerCase();
 
-    // Check for Telegram message / media sending intent
-    const hasTgKeyword =
-      lowerTrimmed.includes('telegram') ||
-      /(?:send|forward|deliver)\s+(?:it|this|them|that|the\s+photo|the\s+screenshot)?\s*(?:to\s+|throw\s+|through\s+)?(@[a-zA-Z0-9_]+|me\b|self\b)/i.test(trimmed) ||
-      /@([a-zA-Z0-9_]{3,32})\b/.test(trimmed);
+    // Typo-tolerant screenshot detection:
+    // Matches: screenhot, screnshot, scerenshot, screenshot, screen, screencap, screen capture, desktop, /screneshot, /screenshot, /screen, /shot
+    const wantsScreenshot =
+      /(?:screen\s*hot|scre*n\s*shot|scerenshot|screenshot|screen\s*cap|screen\s*capture|desktop\s*shot|desktop\s*capture|\/scre*n|\/shot)/i.test(trimmed) ||
+      /(?:capture|take|grab|snap|send).*(?:screen|desktop|display)/i.test(trimmed);
 
-    // Extract recipient if present
-    const tgRecipientMatch =
+    // Typo-tolerant photo / webcam detection:
+    // Matches: photo, foto, picture, pic, webcam, camera, facetime, /camera, /photo, /pic
+    const hasNegativeWebcam = /not\s+(?:a\s+)?(?:web\s*cam|camera|photo|pic)/i.test(trimmed);
+    const wantsPhoto =
+      !hasNegativeWebcam &&
+      /(?:photo|foto|picture|\bpic\b|webcam|camera|facetime|\bcam\b|\/camera|\/photo)/i.test(trimmed);
+
+    // Telegram recipient detection:
+    // 1. In current message: @username, 'me', or phone number
+    let detectedRecipient: string | null = null;
+    const recipientMatch =
       trimmed.match(/(?:to|throw|through|via|on)\s+(?:telegram\s+to\s+)?(@[a-zA-Z0-9_]+|me\b|self\b|\+?\d{8,15}\b)/i) ||
       trimmed.match(/(@[a-zA-Z0-9_]{3,32})/i) ||
       trimmed.match(/\b(?:to\s+)(me\b|self\b)/i);
 
-    if (hasTgKeyword && tgRecipientMatch) {
-      const recipient = tgRecipientMatch[1];
+    if (recipientMatch) {
+      detectedRecipient = recipientMatch[1];
+    } else {
+      // 2. Check if previous messages in conversation recently targeted a recipient (e.g. user follow-up / correction)
+      // Example: "no pal a screenshot not a web cam, a /screneshot" or "send screenshot instead"
+      const isFollowUpOrCorrection =
+        /^(?:no\b|not\b|send\b|also\b|and\b|just\b|a\s+screen|a\s+photo|instead)/i.test(trimmed) ||
+        lowerTrimmed.includes('instead') ||
+        hasNegativeWebcam;
+
+      if (isFollowUpOrCorrection) {
+        const recentMessages = [...history].slice(-4).reverse();
+        for (const m of recentMessages) {
+          const match =
+            m.content.match(/@([a-zA-Z0-9_]{3,32})/i) ||
+            m.content.match(/\bto\s+`(@[a-zA-Z0-9_]+|me)`/i) ||
+            m.content.match(/\bto\s+(@[a-zA-Z0-9_]+|me)\b/i);
+          if (match) {
+            detectedRecipient = match[1];
+            break;
+          }
+        }
+      }
+    }
+
+    // Has telegram intent: explicit mention of telegram OR has recipient
+    const hasTgIntent =
+      lowerTrimmed.includes('telegram') ||
+      lowerTrimmed.includes('throw telegram') ||
+      lowerTrimmed.includes('through telegram') ||
+      lowerTrimmed.includes('via telegram') ||
+      Boolean(
+        detectedRecipient &&
+          (wantsScreenshot ||
+            wantsPhoto ||
+            /send|forward|deliver|post|message/i.test(trimmed) ||
+            /^(?:no\b|not\b|just\b|a\s+screen|a\s+photo)/i.test(trimmed))
+      );
+
+    if (hasTgIntent && detectedRecipient) {
       this.recordMetric('telegramMessages');
       callbacks.onUpdateMessage(assistantMessageId, {
         status: 'thinking',
-        content: `Preparing Telegram delivery to \`${recipient}\`...`,
+        content: `Capturing fresh media and sending to Telegram \`${detectedRecipient}\`...`,
       });
 
       const mediaPathsToSend: string[] = [];
       const mediaUrlsToDisplay: string[] = [];
 
-      // Check if user requested a camera photo
-      const wantsPhoto = /(?:take|snap|capture|shoot)\s+(?:a\s+)?(?:photo|picture|webcam|camera)/i.test(trimmed);
-      if (wantsPhoto) {
+      // Determine what fresh captures are needed
+      let needPhoto = wantsPhoto;
+      let needScreenshot = wantsScreenshot;
+      if (!needPhoto && !needScreenshot) {
+        // If neither was explicitly requested, default to fresh screenshot
+        needScreenshot = true;
+      }
+
+      // Always take a brand new fresh photo if requested (never re-use old photos)
+      if (needPhoto) {
         try {
           const photo = await takeCameraPhoto();
           callbacks.onScreenshotReady(photo.publicUrl);
           mediaUrlsToDisplay.push(photo.publicUrl);
           mediaPathsToSend.push(photo.filePath);
         } catch (err: any) {
-          console.error('Camera snap error in compound telegram flow:', err);
+          console.error('Camera capture error in telegram flow:', err);
         }
       }
 
-      // Check if user requested a screenshot
-      const wantsScreenshot = /(?:take|snap|capture)\s+(?:a\s+)?(?:screenshot|scerenshot|screen\s+capture|screen)/i.test(trimmed);
-      if (wantsScreenshot) {
+      // Always take a brand new fresh screenshot if requested (never re-use old photos)
+      if (needScreenshot) {
         try {
           const shot = await takeMacScreenshot();
           callbacks.onScreenshotReady(shot.publicUrl);
           mediaUrlsToDisplay.push(shot.publicUrl);
           mediaPathsToSend.push(shot.filePath);
         } catch (err: any) {
-          console.error('Screenshot capture error in compound telegram flow:', err);
-        }
-      }
-
-      // If user references previous captures ("send it", "send this") or didn't request a fresh capture, gather from recent history
-      const referencesPrevious = /(?:send\s+(?:it|this|them|that|the\s+photo|the\s+screenshot|the\s+picture))/i.test(trimmed);
-      if (mediaPathsToSend.length === 0 || referencesPrevious) {
-        const recentMessages = [...history].slice(-8).reverse();
-        for (const m of recentMessages) {
-          if (m.mediaUrls && m.mediaUrls.length > 0) {
-            for (const url of m.mediaUrls) {
-              if (!mediaUrlsToDisplay.includes(url)) {
-                mediaUrlsToDisplay.push(url);
-                mediaPathsToSend.push(url);
-              }
-            }
-          } else if (m.screenshotUrl) {
-            if (!mediaUrlsToDisplay.includes(m.screenshotUrl)) {
-              mediaUrlsToDisplay.push(m.screenshotUrl);
-              mediaPathsToSend.push(m.screenshotUrl);
-            }
-          }
+          console.error('Screenshot capture error in telegram flow:', err);
         }
       }
 
       // Format caption or message text
       let textToSend = trimmed;
       if (
-        /(?:take\s+a\s+photo|take\s+a\s+screenshot|send\s+it|send\s+this)/i.test(trimmed) &&
+        /(?:take|screen|photo|send\s+it|send\s+this|no\s+pal)/i.test(trimmed) &&
         !trimmed.toLowerCase().includes('saying') &&
         !trimmed.toLowerCase().includes('with text')
       ) {
-        textToSend = `PocketBridge Mac capture (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`;
+        const types = [];
+        if (needPhoto) types.push('webcam photo');
+        if (needScreenshot) types.push('screen capture');
+        const desc = types.length > 0 ? types.join(' & ') : 'Mac capture';
+        textToSend = `PocketBridge fresh ${desc} (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`;
       } else {
         textToSend = trimmed
-          .replace(/(?:please\s+)?(?:take\s+a\s+photo\s+and\s+a?\s*scerenshot\s+and\s+)?(?:send\s+(?:it|this|them)?\s*(?:throw|through|via|on)?\s*telegram\s+to\s+@[a-zA-Z0-9_]+)/i, '')
+          .replace(/(?:please\s+)?(?:take\s+a\s+photo\s+and\s+a?\s*scre*n\s*shot\s+and\s+)?(?:send\s+(?:it|this|them)?\s*(?:throw|through|via|on)?\s*telegram\s+to\s+@[a-zA-Z0-9_]+)/i, '')
           .replace(/send\s+it\s+to\s+@[a-zA-Z0-9_]+/i, '')
           .replace(/send\s+to\s+@[a-zA-Z0-9_]+/i, '')
           .trim();
         if (!textToSend) {
-          textToSend = `PocketBridge Mac message (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`;
+          textToSend = `PocketBridge message (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`;
         }
       }
 
       const res = await sendTelegramMessage({
-        recipient,
+        recipient: detectedRecipient,
         message: textToSend,
         mediaPaths: mediaPathsToSend.length > 0 ? mediaPathsToSend : undefined,
       });
@@ -768,7 +772,7 @@ export class PocketAgent {
       if (res.success) {
         const mediaNote =
           mediaUrlsToDisplay.length > 0
-            ? ` with **${mediaUrlsToDisplay.length} attachment${mediaUrlsToDisplay.length > 1 ? 's' : ''}**`
+            ? ` with **${mediaUrlsToDisplay.length} fresh capture${mediaUrlsToDisplay.length > 1 ? 's' : ''}**`
             : '';
         const msg = `**Telegram message sent** to \`${res.recipient}\`${mediaNote}:\n> ${textToSend}`;
         callbacks.onUpdateMessage(assistantMessageId, {
@@ -779,7 +783,7 @@ export class PocketAgent {
         });
         return msg;
       } else {
-        const msg = `**Failed to send Telegram message** to \`${recipient}\`: ${res.error}`;
+        const msg = `**Failed to send Telegram message** to \`${detectedRecipient}\`: ${res.error}`;
         callbacks.onUpdateMessage(assistantMessageId, {
           status: 'error',
           content: msg,
@@ -790,29 +794,12 @@ export class PocketAgent {
       }
     }
 
-    // Natural language camera photo
-    if (/^(?:please\s+)?(?:take|snap|capture)\s+(?:a\s+)?(?:photo|picture|webcam photo|camera photo)\b/i.test(trimmed)) {
+    // Standalone fresh screenshot (without Telegram)
+    if (wantsScreenshot && !hasTgIntent) {
       this.recordMetric('screenshots');
       callbacks.onUpdateMessage(assistantMessageId, {
         status: 'thinking',
-        content: 'Snapping photo from Mac FaceTime camera...',
-      });
-      const photo = await takeCameraPhoto();
-      callbacks.onScreenshotReady(photo.publicUrl);
-      callbacks.onUpdateMessage(assistantMessageId, {
-        status: 'done',
-        content: `**Captured photo from Mac camera** at ${new Date(photo.timestamp).toLocaleTimeString()}:`,
-        screenshotUrl: photo.publicUrl,
-      });
-      return `Captured photo from Mac camera: ${photo.publicUrl}`;
-    }
-
-    // Natural language screenshot
-    if (/^(?:please\s+)?(?:take|capture|snap)\s+(?:a\s+)?(?:screenshot|scerenshot|screen\s+capture|screen\s+shot)\b/i.test(trimmed)) {
-      this.recordMetric('screenshots');
-      callbacks.onUpdateMessage(assistantMessageId, {
-        status: 'thinking',
-        content: 'Capturing Mac screen...',
+        content: 'Capturing fresh Mac screen...',
       });
       const shot = await takeMacScreenshot();
       callbacks.onScreenshotReady(shot.publicUrl);
@@ -820,8 +807,27 @@ export class PocketAgent {
         status: 'done',
         content: `Captured Mac screen at ${new Date(shot.timestamp).toLocaleTimeString()}.`,
         screenshotUrl: shot.publicUrl,
+        mediaUrls: [shot.publicUrl],
       });
       return `Captured Mac screen: ${shot.publicUrl}`;
+    }
+
+    // Standalone fresh camera photo (without Telegram)
+    if (wantsPhoto && !wantsScreenshot && !hasTgIntent) {
+      this.recordMetric('screenshots');
+      callbacks.onUpdateMessage(assistantMessageId, {
+        status: 'thinking',
+        content: 'Snapping fresh photo from Mac FaceTime camera...',
+      });
+      const photo = await takeCameraPhoto();
+      callbacks.onScreenshotReady(photo.publicUrl);
+      callbacks.onUpdateMessage(assistantMessageId, {
+        status: 'done',
+        content: `**Captured photo from Mac camera** at ${new Date(photo.timestamp).toLocaleTimeString()}:`,
+        screenshotUrl: photo.publicUrl,
+        mediaUrls: [photo.publicUrl],
+      });
+      return `Captured photo from Mac camera: ${photo.publicUrl}`;
     }
 
     // 4. If Pro mode is active (default), execute directly via Antigravity Engine
