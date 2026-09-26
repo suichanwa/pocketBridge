@@ -49,3 +49,13 @@ Execute the following sequential workflow:
 2. Snap the screen: `npx tsx /Users/suiseika/pocketBridge/scripts/take-screenshot.ts`
 3. Send via Telegram: `npx tsx /Users/suiseika/pocketBridge/scripts/send-telegram.ts @username "Mac capture" <photo_path> <screenshot_path>`
 4. Confirm to the user that both captures were taken and delivered to the recipient.
+
+### 5. Node Version Management (fnm)
+This Mac uses `fnm` (Fast Node Manager) located at `/usr/local/bin/fnm`.
+Installed versions: Node 20 (`v20.20.2`), Node 22 (`v22.23.3`), and Node 24 (`v24.20.0`).
+- If any build or compilation fails due to Node version requirements (e.g. Astro requiring Node >= 22.12.0):
+  Switch automatically using:
+  `fnm use 22` or `fnm use 24`
+  or execute via:
+  `fnm exec --using=22 <command>`
+  Never fail or stop to ask the user to switch Node versions manually; always switch using fnm and proceed.
