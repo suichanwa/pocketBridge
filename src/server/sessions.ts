@@ -167,7 +167,7 @@ export async function listLocalAgySessions(): Promise<ChatSessionMeta[]> {
       if (!fsSync.existsSync(transcriptPath)) continue;
 
       try {
-        const stat = await fs.stat(convPath);
+        const stat = await fs.stat(transcriptPath);
         const transcriptContent = await fs.readFile(transcriptPath, 'utf-8');
         const lines = transcriptContent.trim().split('\n').filter(Boolean);
         if (lines.length === 0) continue;
@@ -176,21 +176,37 @@ export async function listLocalAgySessions(): Promise<ChatSessionMeta[]> {
         let preview = '';
         let firstTimestamp = stat.mtimeMs;
 
-        for (const line of lines) {
+        // Find initial user prompt for title
+        for (let i = 0; i < lines.length; i++) {
           try {
-            const item = JSON.parse(line);
+            const item = JSON.parse(lines[i]);
             if (item.type === 'USER_INPUT' && item.content) {
               const match = item.content.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
               const clean = match ? match[1].trim() : item.content.trim();
               const firstLine = clean.split('\n')[0].trim();
               if (firstLine) {
                 title = firstLine.length > 50 ? `${firstLine.slice(0, 50)}...` : firstLine;
-                preview = clean.slice(0, 100);
               }
               if (item.created_at) {
                 firstTimestamp = new Date(item.created_at).getTime() || stat.mtimeMs;
               }
               break;
+            }
+          } catch {}
+        }
+
+        // Find latest user prompt for preview
+        for (let i = lines.length - 1; i >= 0; i--) {
+          try {
+            const item = JSON.parse(lines[i]);
+            if (item.type === 'USER_INPUT' && item.content) {
+              const match = item.content.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
+              const clean = match ? match[1].trim() : item.content.trim();
+              const firstLine = clean.split('\n')[0].trim();
+              if (firstLine) {
+                preview = firstLine.length > 80 ? `${firstLine.slice(0, 80)}...` : firstLine;
+                break;
+              }
             }
           } catch {}
         }
