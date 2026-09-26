@@ -26,7 +26,7 @@ export interface AgyTaskResult {
  */
 export async function runAgyTask(options: AgyTaskOptions): Promise<AgyTaskResult> {
   const model = options.model || 'gemini-3.8-flash-high';
-  const cwd = options.cwd || process.env.WORKSPACE_ROOT || os.homedir();
+  const cwd = options.cwd || process.env.WORKSPACE_ROOT || process.cwd();
   const timeoutMs = options.timeoutMs || 300_000; // 5 min default timeout for deep tasks
   const startTime = Date.now();
 
