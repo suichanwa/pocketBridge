@@ -5,7 +5,7 @@ set -e
 export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.cargo/bin:$PATH"
 
 if [ -x "/usr/local/bin/fnm" ]; then
-  eval "$(/usr/local/bin/fnm env)"
+  eval "$(/usr/local/bin/fnm env --shell bash)"
 fi
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
