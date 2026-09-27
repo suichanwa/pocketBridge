@@ -22,7 +22,10 @@ export async function executeShellCommand(
   options: ShellExecOptions = {}
 ): Promise<ShellExecResult> {
   const cwd = options.cwd || os.homedir();
-  const timeoutMs = options.timeoutMs || 120_000; // 2 min default timeout
+  const timeoutMs =
+    options.timeoutMs !== undefined
+      ? options.timeoutMs
+      : Number(process.env.SHELL_TIMEOUT_MS) || 600_000; // 10 min default timeout for builds/tests
   const startTime = Date.now();
 
   let combinedOutput = '';
