@@ -480,7 +480,11 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      alert('Speech recognition is not supported in this browser. Please use iOS Safari, Chrome, or Edge.');
+      if (typeof window !== 'undefined' && window.isSecureContext === false) {
+        alert('Microphone access requires a secure connection (HTTPS). Use the HTTPS link or configure Chrome to treat this address as secure.');
+      } else {
+        alert('Speech recognition is not supported in this browser. Please use iOS Safari, Chrome, or Edge.');
+      }
       return;
     }
 
