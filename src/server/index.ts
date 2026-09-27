@@ -243,6 +243,140 @@ async function notifyTaskCompleteIfEnabled(promptText: string, status: 'done' | 
   }
 }
 
+interface QueuedTask {
+  sessionId: string;
+  userText: string;
+  userImages?: string[];
+  assistantMsgId: string;
+}
+
+const sessionQueues = new Map<string, QueuedTask[]>();
+const activeProcessingSessions = new Set<string>();
+
+async function drainSessionQueue(sessionId: string) {
+  if (activeProcessingSessions.has(sessionId)) return;
+
+  const queue = sessionQueues.get(sessionId);
+  if (!queue || queue.length === 0) return;
+
+  activeProcessingSessions.add(sessionId);
+  const task = queue.shift()!;
+
+  // Clear queued status text on the assistant message as it begins execution
+  const targetAssistant = activeSession.messages.find((m) => m.id === task.assistantMsgId);
+  if (targetAssistant && targetAssistant.content.startsWith('Queued')) {
+    targetAssistant.content = '';
+    broadcast({
+      type: 'chat_update',
+      messageId: task.assistantMsgId,
+      partial: { content: '', status: 'thinking' },
+    });
+  }
+
+  try {
+    await agent.handleUserMessage(
+      task.userText,
+      activeSession.messages,
+      task.assistantMsgId,
+      {
+        onUpdateMessage: (msgId, partial) => {
+          const target = activeSession.messages.find((m) => m.id === msgId);
+          if (target) {
+            Object.assign(target, partial);
+          }
+          broadcast({ type: 'chat_update', messageId: msgId, partial });
+          if (partial.status === 'done' || partial.status === 'error') {
+            savePocketSession(activeSession).catch(console.error);
+            notifyTaskCompleteIfEnabled(task.userText, partial.status, target?.content || partial.content);
+          }
+        },
+        onTerminalLog: (log) => {
+          activeSession.terminalLogs = activeSession.terminalLogs || [];
+          activeSession.terminalLogs.push(log);
+          broadcast({ type: 'terminal_log', log });
+          savePocketSession(activeSession).catch(console.error);
+        },
+        onTerminalChunk: (logId, chunk, exitCode) => {
+          activeSession.terminalLogs = activeSession.terminalLogs || [];
+          const log = activeSession.terminalLogs.find((l) => l.id === logId);
+          if (log) {
+            log.output += chunk;
+            if (exitCode !== undefined) {
+              log.exitCode = exitCode;
+              log.status = exitCode === 0 ? 'completed' : 'failed';
+            }
+          }
+          broadcast({
+            type: 'terminal_log_update',
+            logId,
+            chunk,
+            exitCode,
+            status: exitCode !== undefined ? (exitCode === 0 ? 'completed' : 'failed') : undefined,
+          });
+          if (exitCode !== undefined) {
+            savePocketSession(activeSession).catch(console.error);
+          }
+        },
+        onScreenshotReady: (url) => {
+          broadcast({
+            type: 'screenshot_ready',
+            url,
+            timestamp: Date.now(),
+          });
+        },
+        onStatusChange: async (tier, activeModel) => {
+          process.env.MODEL_TIER = tier;
+          process.env.ACTIVE_MODEL = activeModel;
+          try {
+            const envPath = path.resolve(process.cwd(), '.env');
+            let envContent = '';
+            try {
+              envContent = await fs.readFile(envPath, 'utf-8');
+            } catch {}
+            const updateEnvKey = (key: string, val: string) => {
+              const regex = new RegExp(`^${key}=.*$`, 'm');
+              if (regex.test(envContent)) {
+                envContent = envContent.replace(regex, `${key}=${val}`);
+              } else {
+                envContent += `\n${key}=${val}`;
+              }
+            };
+            updateEnvKey('MODEL_TIER', tier);
+            updateEnvKey('ACTIVE_MODEL', activeModel);
+            await fs.writeFile(envPath, envContent.trim() + '\n', 'utf-8');
+          } catch (err) {
+            console.error('Error persisting model change to .env:', err);
+          }
+          const updatedStatus = await getLiveSystemStatus();
+          broadcast({ type: 'system_status', status: updatedStatus });
+        },
+        onConversationId: async (id: string) => {
+          if (id && activeSession.agyConversationId !== id) {
+            activeSession.agyConversationId = id;
+            await savePocketSession(activeSession).catch(console.error);
+          }
+        },
+      },
+      activeSession.agyConversationId,
+      task.userImages
+    );
+  } catch (err: any) {
+    console.error('Error processing queued agent task:', err);
+    broadcast({
+      type: 'chat_update',
+      messageId: task.assistantMsgId,
+      partial: {
+        status: 'error',
+        content: `Error: ${err?.message || 'Agent task failed'}`,
+      },
+    });
+  } finally {
+    activeProcessingSessions.delete(sessionId);
+    // Drain next queued task sequentially
+    setImmediate(() => drainSessionQueue(sessionId));
+  }
+}
+
 async function startServer() {
   await fs.mkdir(CAPTURES_DIR, { recursive: true });
   await ensureSessionsDir();
@@ -847,10 +981,12 @@ TELEGRAM_NOTIFY_ON_COMPLETE=${process.env.TELEGRAM_NOTIFY_ON_COMPLETE || 'false'
           activeSession.messages.push(userMsg);
           broadcast({ type: 'chat_message', message: userMsg });
 
+          const isBusy = activeProcessingSessions.has(activeSession.id);
+
           const assistantMsg: ChatMessage = {
             id: assistantMsgId,
             role: 'assistant',
-            content: '',
+            content: isBusy ? 'Queued (waiting for previous task to finish)...' : '',
             timestamp: Date.now(),
             status: 'thinking',
           };
@@ -858,93 +994,17 @@ TELEGRAM_NOTIFY_ON_COMPLETE=${process.env.TELEGRAM_NOTIFY_ON_COMPLETE || 'false'
           broadcast({ type: 'chat_message', message: assistantMsg });
           savePocketSession(activeSession).catch(console.error);
 
-          // Run Agent asynchronously
-          agent.handleUserMessage(
+          if (!sessionQueues.has(activeSession.id)) {
+            sessionQueues.set(activeSession.id, []);
+          }
+          sessionQueues.get(activeSession.id)!.push({
+            sessionId: activeSession.id,
             userText,
-            activeSession.messages,
+            userImages,
             assistantMsgId,
-            {
-              onUpdateMessage: (msgId, partial) => {
-                const target = activeSession.messages.find((m) => m.id === msgId);
-                if (target) {
-                  Object.assign(target, partial);
-                }
-                broadcast({ type: 'chat_update', messageId: msgId, partial });
-                if (partial.status === 'done' || partial.status === 'error') {
-                  savePocketSession(activeSession).catch(console.error);
-                  notifyTaskCompleteIfEnabled(userText, partial.status, target?.content || partial.content);
-                }
-              },
-              onTerminalLog: (log) => {
-                activeSession.terminalLogs = activeSession.terminalLogs || [];
-                activeSession.terminalLogs.push(log);
-                broadcast({ type: 'terminal_log', log });
-                savePocketSession(activeSession).catch(console.error);
-              },
-              onTerminalChunk: (logId, chunk, exitCode) => {
-                activeSession.terminalLogs = activeSession.terminalLogs || [];
-                const log = activeSession.terminalLogs.find((l) => l.id === logId);
-                if (log) {
-                  log.output += chunk;
-                  if (exitCode !== undefined) {
-                    log.exitCode = exitCode;
-                    log.status = exitCode === 0 ? 'completed' : 'failed';
-                  }
-                }
-                broadcast({
-                  type: 'terminal_log_update',
-                  logId,
-                  chunk,
-                  exitCode,
-                  status: exitCode !== undefined ? (exitCode === 0 ? 'completed' : 'failed') : undefined,
-                });
-                if (exitCode !== undefined) {
-                  savePocketSession(activeSession).catch(console.error);
-                }
-              },
-              onScreenshotReady: (url) => {
-                broadcast({
-                  type: 'screenshot_ready',
-                  url,
-                  timestamp: Date.now(),
-                });
-              },
-              onStatusChange: async (tier, activeModel) => {
-                process.env.MODEL_TIER = tier;
-                process.env.ACTIVE_MODEL = activeModel;
-                try {
-                  const envPath = path.resolve(process.cwd(), '.env');
-                  let envContent = '';
-                  try {
-                    envContent = await fs.readFile(envPath, 'utf-8');
-                  } catch {}
-                  const updateEnvKey = (key: string, val: string) => {
-                    const regex = new RegExp(`^${key}=.*$`, 'm');
-                    if (regex.test(envContent)) {
-                      envContent = envContent.replace(regex, `${key}=${val}`);
-                    } else {
-                      envContent += `\n${key}=${val}`;
-                    }
-                  };
-                  updateEnvKey('MODEL_TIER', tier);
-                  updateEnvKey('ACTIVE_MODEL', activeModel);
-                  await fs.writeFile(envPath, envContent.trim() + '\n', 'utf-8');
-                } catch (err) {
-                  console.error('Error persisting model change to .env:', err);
-                }
-                const updatedStatus = await getLiveSystemStatus();
-                broadcast({ type: 'system_status', status: updatedStatus });
-              },
-              onConversationId: async (id: string) => {
-                if (id && activeSession.agyConversationId !== id) {
-                  activeSession.agyConversationId = id;
-                  await savePocketSession(activeSession).catch(console.error);
-                }
-              },
-            },
-            activeSession.agyConversationId,
-            userImages
-          );
+          });
+
+          drainSessionQueue(activeSession.id);
         } else if (clientMsg.type === 'run_quick_action') {
           if (clientMsg.action === 'screenshot') {
             const shot = await takeMacScreenshot();
