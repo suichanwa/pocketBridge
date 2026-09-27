@@ -11,9 +11,8 @@ fi
 
 echo "========================================================"
 echo "Launching PocketBridge with macOS Awake Management"
-echo "   - Keeps your Mac awake while the lid is open"
-echo "   - Naturally sleeps/hibernates when you close the lid"
+echo "   - Prevents system, disk, and idle sleep"
 echo "========================================================"
 
-# caffeinate -i: prevents system idle sleep while script runs
-exec caffeinate -i npx tsx src/server/index.ts
+# caffeinate -ims: prevents system sleep, disk sleep, and idle sleep while running
+exec caffeinate -ims npx tsx src/server/index.ts
