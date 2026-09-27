@@ -38,9 +38,13 @@ import {
   RotateCw,
   Zap,
   ImagePlus,
+  ShieldAlert,
+  Lock,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { MarkdownView } from './MarkdownView.js';
-import type { ChatMessage, ToolCallRecord } from '../../shared/types.js';
+import type { ChatMessage, ToolCallRecord, SystemStatus } from '../../shared/types.js';
 
 interface CommandOption {
   name: string;
@@ -143,6 +147,7 @@ const AVAILABLE_COMMANDS: CommandOption[] = [
 
 interface ChatFeedProps {
   messages: ChatMessage[];
+  status?: SystemStatus | null;
   onSendMessage: (text: string, images?: string[]) => void;
   onClearChat?: () => void;
   disabled?: boolean;
@@ -150,6 +155,7 @@ interface ChatFeedProps {
 
 export const ChatFeed: React.FC<ChatFeedProps> = ({
   messages,
+  status,
   onSendMessage,
   onClearChat,
   disabled,
@@ -162,12 +168,19 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
   const [selectedCmdIndex, setSelectedCmdIndex] = useState(0);
   const [showCommands, setShowCommands] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [micError, setMicError] = useState<string | null>(null);
+  const [secureModalOpen, setSecureModalOpen] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const baseInputRef = useRef<string>('');
   const commandItemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const PAGE_SIZE = 30;
@@ -467,62 +480,182 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
     setExpandedTools((prev) => ({ ...prev, [toolId]: !prev[toolId] }));
   };
 
-  const toggleListening = () => {
-    if (isListening) {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-      setIsListening(false);
-      return;
-    }
-
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      if (typeof window !== 'undefined' && window.isSecureContext === false) {
-        alert('Microphone access requires a secure connection (HTTPS). Use the HTTPS link or configure Chrome to treat this address as secure.');
-      } else {
-        alert('Speech recognition is not supported in this browser. Please use iOS Safari, Chrome, or Edge.');
-      }
+  const startAudioRecordingFallback = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setMicError('Audio recording is not supported in this browser.');
       return;
     }
 
     try {
-      const recognition = new SpeechRecognition();
-      recognitionRef.current = recognition;
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = navigator.language || 'en-US';
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
 
-      recognition.onstart = () => {
-        setIsListening(true);
-      };
-
-      recognition.onresult = (event: any) => {
-        let transcript = '';
-        for (let i = 0; i < event.results.length; i++) {
-          transcript += event.results[i][0].transcript;
+      let mimeType = 'audio/webm';
+      if (typeof MediaRecorder !== 'undefined') {
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+          mimeType = 'audio/webm;codecs=opus';
+        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+          mimeType = 'audio/mp4';
+        } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+          mimeType = 'audio/ogg';
         }
-        if (transcript) {
-          setInputText(transcript);
+      }
+
+      const recorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = recorder;
+      baseInputRef.current = inputText;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
         }
       };
 
-      recognition.onerror = (event: any) => {
-        console.warn('Speech recognition error:', event.error);
+      recorder.onstop = async () => {
         setIsListening(false);
+        stream.getTracks().forEach((track) => track.stop());
+
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        if (audioBlob.size < 500) return;
+
+        setIsTranscribing(true);
+        try {
+          const reader = new FileReader();
+          reader.readAsDataURL(audioBlob);
+          reader.onloadend = async () => {
+            try {
+              const base64Audio = reader.result as string;
+              const res = await fetch('/api/transcribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ audio: base64Audio, mimeType }),
+              });
+              const data = await res.json();
+              if (data.success && data.text) {
+                const base = baseInputRef.current.trim();
+                setInputText(base ? `${base} ${data.text.trim()}` : data.text.trim());
+              } else if (data.error) {
+                setMicError(`Transcription error: ${data.error}`);
+              }
+            } catch (err: any) {
+              console.error('Audio transcription request failed:', err);
+              setMicError('Failed to transcribe audio.');
+            } finally {
+              setIsTranscribing(false);
+            }
+          };
+        } catch (err: any) {
+          console.error('Error reading recorded audio:', err);
+          setIsTranscribing(false);
+        }
       };
 
-      recognition.onend = () => {
-        setIsListening(false);
-      };
-
-      recognition.start();
-    } catch (err) {
-      console.error('Failed to initiate speech recognition:', err);
+      recorder.start(250);
+      setIsListening(true);
+      setMicError(null);
+    } catch (err: any) {
+      console.error('Failed to get microphone stream:', err);
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        setMicError('Microphone permission denied. Allow mic access in browser settings.');
+      } else {
+        setMicError(`Microphone error: ${err.message || 'Could not access mic'}`);
+      }
       setIsListening(false);
     }
+  };
+
+  const toggleListening = async () => {
+    // 1. If currently listening/recording, stop it
+    if (isListening) {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch {}
+      }
+      setIsListening(false);
+      return;
+    }
+
+    setMicError(null);
+
+    // 2. Check Secure Context:
+    // If accessing over plain HTTP on LAN or Tailscale from phone,
+    // modern browsers forbid microphone access unless on localhost or HTTPS.
+    const isSecure =
+      typeof window !== 'undefined' &&
+      (window.isSecureContext ||
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1');
+
+    if (!isSecure) {
+      setSecureModalOpen(true);
+      return;
+    }
+
+    // 3. Try Web Speech API (streaming client recognition for Chrome/Safari/Edge)
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (SpeechRecognition) {
+      try {
+        const recognition = new SpeechRecognition();
+        recognitionRef.current = recognition;
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = navigator.language || 'en-US';
+
+        baseInputRef.current = inputText;
+
+        recognition.onstart = () => {
+          setIsListening(true);
+          setMicError(null);
+        };
+
+        recognition.onresult = (event: any) => {
+          let currentTranscript = '';
+          for (let i = 0; i < event.results.length; i++) {
+            currentTranscript += event.results[i][0].transcript;
+          }
+          const base = baseInputRef.current.trim();
+          if (currentTranscript.trim()) {
+            setInputText(base ? `${base} ${currentTranscript.trim()}` : currentTranscript.trim());
+          }
+        };
+
+        recognition.onerror = (event: any) => {
+          console.warn('Speech recognition error:', event.error);
+          if (event.error === 'not-allowed') {
+            setMicError('Microphone permission denied. Allow mic access in browser settings.');
+            setIsListening(false);
+          } else if (event.error === 'network') {
+            console.log('Speech recognition network error, falling back to MediaRecorder');
+            setIsListening(false);
+            startAudioRecordingFallback();
+          } else if (event.error === 'no-speech') {
+            // Quiet pause, keep going
+          } else {
+            setIsListening(false);
+          }
+        };
+
+        recognition.onend = () => {
+          setIsListening(false);
+        };
+
+        recognition.start();
+        return;
+      } catch (err) {
+        console.warn('SpeechRecognition failed to start, falling back to MediaRecorder:', err);
+      }
+    }
+
+    // 4. Fallback to MediaRecorder + Gemini server transcription (Firefox, WebView, etc.)
+    await startAudioRecordingFallback();
   };
 
   const handleToggleSpeak = (msgId: string, text: string) => {

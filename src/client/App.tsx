@@ -346,6 +346,7 @@ export function App() {
           <TabsContent value="chat" className="flex-1 overflow-hidden m-0 data-[state=active]:flex data-[state=active]:flex-col">
             <ChatFeed
               messages={messages}
+              status={status}
               onSendMessage={sendMessage}
               onClearChat={clearChat}
               disabled={!isConnected}
@@ -453,6 +454,7 @@ export function App() {
             <div className="flex-1 overflow-hidden">
               <ChatFeed
                 messages={messages}
+                status={status}
                 onSendMessage={sendMessage}
                 onClearChat={clearChat}
                 disabled={!isConnected}

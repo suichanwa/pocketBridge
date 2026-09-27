@@ -39,6 +39,7 @@ import {
   resolveSafePath,
   deleteFileSystemItem,
 } from './files.js';
+import { startTunnel, getTunnelUrl } from './tunnel.js';
 
 // Load .env
 dotenv.config();
@@ -216,6 +217,7 @@ async function getLiveSystemStatus(): Promise<SystemStatus> {
     modelTier: agent.getModelTier(),
     activeModel: agent.getActiveModel(),
     telegramNotifyOnComplete: process.env.TELEGRAM_NOTIFY_ON_COMPLETE === 'true',
+    tunnelUrl: getTunnelUrl(),
   };
 }
 
@@ -305,6 +307,60 @@ async function startServer() {
   // REST API Routes
   app.get('/api/status', async () => {
     return await getLiveSystemStatus();
+  });
+
+  app.get('/api/tunnel', async () => {
+    return { tunnelUrl: getTunnelUrl() };
+  });
+
+  app.post('/api/transcribe', async (req, reply) => {
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return reply.status(400).send({ success: false, error: 'GEMINI_API_KEY not configured on server' });
+      }
+
+      let base64Audio = '';
+      let mimeType = 'audio/webm';
+
+      if (req.isMultipart()) {
+        const data = await req.file();
+        if (!data) {
+          return reply.status(400).send({ success: false, error: 'No audio file provided' });
+        }
+        mimeType = data.mimetype || 'audio/webm';
+        const buffer = await data.toBuffer();
+        base64Audio = buffer.toString('base64');
+      } else {
+        const body = req.body as any;
+        if (!body?.audio) {
+          return reply.status(400).send({ success: false, error: 'Missing base64 audio data' });
+        }
+        base64Audio = body.audio.replace(/^data:audio\/[a-zA-Z0-9]+;base64,/, '');
+        if (body.mimeType) mimeType = body.mimeType;
+      }
+
+      const { GoogleGenAI } = await import('@google/genai');
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await ai.models.generateContent({
+        model: 'gemini-flash-latest',
+        contents: [
+          {
+            inlineData: {
+              mimeType,
+              data: base64Audio,
+            },
+          },
+          'Transcribe the spoken audio verbatim in its original spoken language. Return ONLY the transcribed text, with no extra commentary, notes, or punctuation wrappers.',
+        ],
+      });
+
+      const text = response.text?.trim() || '';
+      return { success: true, text };
+    } catch (err: any) {
+      console.error('Audio transcription error:', err);
+      return reply.status(500).send({ success: false, error: err?.message || 'Failed to transcribe audio' });
+    }
   });
 
   app.get('/api/captures', async () => {
@@ -879,6 +935,12 @@ TELEGRAM_NOTIFY_ON_COMPLETE=${process.env.TELEGRAM_NOTIFY_ON_COMPLETE || 'false'
                 const updatedStatus = await getLiveSystemStatus();
                 broadcast({ type: 'system_status', status: updatedStatus });
               },
+              onConversationId: async (id: string) => {
+                if (id && activeSession.agyConversationId !== id) {
+                  activeSession.agyConversationId = id;
+                  await savePocketSession(activeSession).catch(console.error);
+                }
+              },
             },
             activeSession.agyConversationId,
             userImages
@@ -1006,6 +1068,14 @@ TELEGRAM_NOTIFY_ON_COMPLETE=${process.env.TELEGRAM_NOTIFY_ON_COMPLETE || 'false'
   }
   console.log(`Bonjour/mDNS URL: http://${bonjourHost}.local:${PORT}`);
   console.log(`========================================================\n`);
+
+  // Automatically start Cloudflare HTTPS tunnel for microphone & remote access
+  startTunnel(PORT, async (tunnelUrl) => {
+    const updatedStatus = await getLiveSystemStatus();
+    broadcast({ type: 'system_status', status: updatedStatus });
+  }).catch((err) => {
+    console.warn('[Tunnel] Could not initialize tunnel:', err?.message || err);
+  });
 }
 
 startServer().catch((err) => {

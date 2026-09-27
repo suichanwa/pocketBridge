@@ -40,6 +40,7 @@ export interface AgentCallbacks {
   onTerminalChunk: (logId: string, chunk: string, exitCode?: number) => void;
   onScreenshotReady: (url: string) => void;
   onStatusChange?: (tier: 'flash' | 'pro', activeModel: string) => void;
+  onConversationId?: (agyConversationId: string) => void;
 }
 
 // Function declarations for Gemini Tool Calling
@@ -332,17 +333,13 @@ export class PocketAgent {
       this.cavemanMode = level;
 
       // Forward /caveman command to AGY session if active
-      if (this.modelTier === 'pro') {
+      if (this.modelTier === 'pro' && agyConversationId) {
         const logId = `term-${Date.now()}`;
-        const continues = history.length > 0;
         const modelName = this.customAgyModel;
-        const resumeFlag = agyConversationId
-          ? `--conversation ${agyConversationId} `
-          : (continues ? '-c ' : '');
 
         callbacks.onTerminalLog({
           id: logId,
-          command: `agy --model ${modelName} --dangerously-skip-permissions ${resumeFlag}-p "/caveman ${level}"`,
+          command: `agy --model ${modelName} --dangerously-skip-permissions --conversation ${agyConversationId} -p "/caveman ${level}"`,
           output: '',
           status: 'running',
           timestamp: Date.now(),
@@ -352,7 +349,6 @@ export class PocketAgent {
           prompt: `/caveman ${level}`,
           model: modelName,
           conversationId: agyConversationId,
-          continueSession: !agyConversationId && continues,
           onChunk: (chunk) => callbacks.onTerminalChunk(logId, chunk),
         });
 
@@ -505,6 +501,8 @@ export class PocketAgent {
       const res = await runAgyTask({
         prompt: agyPrompt,
         model: agyModel,
+        conversationId: agyConversationId,
+        onConversationId: (id) => callbacks.onConversationId?.(id),
         onChunk: (chunk) => callbacks.onTerminalChunk(logId, chunk),
       });
 
@@ -919,11 +917,8 @@ export class PocketAgent {
     if (this.modelTier === 'pro') {
       this.recordMetric('agyTasks');
       const logId = `term-${Date.now()}`;
-      const continues = history.length > 0;
       const modelName = this.customAgyModel;
-      const resumeFlag = agyConversationId
-        ? `--conversation ${agyConversationId} `
-        : (continues ? '-c ' : '');
+      const resumeFlag = agyConversationId ? `--conversation ${agyConversationId} ` : '';
 
       let rawPrompt = trimmed;
       if (hasAttachedImages && attachedImages) {
@@ -954,13 +949,27 @@ export class PocketAgent {
         ? `[Caveman ${this.cavemanMode}: terse smart caveman style, max compression, zero filler/articles/hedging/pleasantries. Shortest decisive output.]\n\n${rawPrompt}`
         : rawPrompt;
 
+      let streamedText = '';
       const res = await runAgyTask({
         prompt: promptToSend,
         model: modelName,
         conversationId: agyConversationId,
-        continueSession: !agyConversationId && continues,
-        onChunk: (chunk) => callbacks.onTerminalChunk(logId, chunk),
+        onConversationId: (id) => callbacks.onConversationId?.(id),
+        onChunk: (chunk) => {
+          callbacks.onTerminalChunk(logId, chunk);
+          if (chunk && !chunk.startsWith('\n[Executing ')) {
+            streamedText += chunk;
+            callbacks.onUpdateMessage(assistantMessageId, {
+              status: 'thinking',
+              content: streamedText,
+            });
+          }
+        },
       });
+
+      if (res.conversationId && callbacks.onConversationId) {
+        callbacks.onConversationId(res.conversationId);
+      }
 
       callbacks.onTerminalChunk(logId, '', res.exitCode);
 
@@ -1305,6 +1314,8 @@ ${this.cavemanMode !== 'off' ? `\nCAVEMAN ${this.cavemanMode.toUpperCase()} MODE
               const agyRes = await runAgyTask({
                 prompt,
                 model,
+                conversationId: agyConversationId,
+                onConversationId: (id) => callbacks.onConversationId?.(id),
                 onChunk: (chunk) => callbacks.onTerminalChunk(logId, chunk),
               });
 

@@ -53,6 +53,7 @@ export interface SystemStatus {
   modelTier: 'flash' | 'pro';
   activeModel?: string;
   telegramNotifyOnComplete?: boolean;
+  tunnelUrl?: string;
 }
 
 export interface ConfigSettings {
