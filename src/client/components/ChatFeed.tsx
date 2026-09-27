@@ -44,6 +44,7 @@ import {
   Check,
 } from 'lucide-react';
 import { MarkdownView } from './MarkdownView.js';
+import { fetchWithRetry } from '@/lib/fetchWithRetry.js';
 import type { ChatMessage, ToolCallRecord, SystemStatus } from '../../shared/types.js';
 
 interface CommandOption {
@@ -442,9 +443,11 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
       try {
         const formData = new FormData();
         formData.append('file', selectedImage.file);
-        const res = await fetch('/api/chat/upload', {
+        const res = await fetchWithRetry('/api/chat/upload', {
           method: 'POST',
           body: formData,
+          retries: 3,
+          retryDelay: 400,
         });
         if (!res.ok) {
           throw new Error(`Upload failed with status ${res.status}`);
@@ -525,10 +528,12 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
           reader.onloadend = async () => {
             try {
               const base64Audio = reader.result as string;
-              const res = await fetch('/api/transcribe', {
+              const res = await fetchWithRetry('/api/transcribe', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ audio: base64Audio, mimeType }),
+                retries: 2,
+                retryDelay: 500,
               });
               const data = await res.json();
               if (data.success && data.text) {

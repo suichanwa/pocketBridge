@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import type { FileItem } from '../../shared/types.js';
+import { fetchWithRetry } from '@/lib/fetchWithRetry.js';
 import { Button } from '@/components/ui/button.js';
 import { Input } from '@/components/ui/input.js';
 import { ScrollArea } from '@/components/ui/scroll-area.js';
@@ -48,7 +49,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ isOpen, onClose }) => 
       const url = targetPath
         ? `/api/files?path=${encodeURIComponent(targetPath)}`
         : '/api/files';
-      const res = await fetch(url);
+      const res = await fetchWithRetry(url, { retries: 3, retryDelay: 400 });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || 'Failed to list directory');
@@ -92,9 +93,11 @@ export const FileManager: React.FC<FileManagerProps> = ({ isOpen, onClose }) => 
       formData.append('file', file);
 
       const uploadUrl = `/api/files/upload?path=${encodeURIComponent(currentPath)}`;
-      const res = await fetch(uploadUrl, {
+      const res = await fetchWithRetry(uploadUrl, {
         method: 'POST',
         body: formData,
+        retries: 2,
+        retryDelay: 500,
       });
 
       if (!res.ok) {
@@ -118,8 +121,10 @@ export const FileManager: React.FC<FileManagerProps> = ({ isOpen, onClose }) => 
     if (!window.confirm(`Delete ${filename}?`)) return;
 
     try {
-      const res = await fetch(`/api/files?path=${encodeURIComponent(filePath)}`, {
+      const res = await fetchWithRetry(`/api/files?path=${encodeURIComponent(filePath)}`, {
         method: 'DELETE',
+        retries: 2,
+        retryDelay: 500,
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));

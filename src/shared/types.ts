@@ -102,7 +102,8 @@ export type ClientMessage =
   | { type: 'switch_session'; sessionId: string; pin?: string }
   | { type: 'new_session'; title?: string; pin?: string }
   | { type: 'delete_session'; sessionId: string; pin?: string }
-  | { type: 'resume_agy_session'; conversationId: string; pin?: string };
+  | { type: 'resume_agy_session'; conversationId: string; pin?: string }
+  | { type: 'ping' };
 
 export type ServerMessage =
   | { type: 'init_state'; messages: ChatMessage[]; terminalLogs: TerminalLog[]; status: SystemStatus; sessions?: ChatSessionMeta[]; agySessions?: ChatSessionMeta[]; activeSessionId?: string }
@@ -116,4 +117,5 @@ export type ServerMessage =
   | { type: 'screenshot_ready'; url: string; timestamp: number }
   | { type: 'sessions_list'; sessions: ChatSessionMeta[]; agySessions: ChatSessionMeta[]; activeSessionId: string }
   | { type: 'session_loaded'; session: ChatSession; sessions?: ChatSessionMeta[]; agySessions?: ChatSessionMeta[] }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | { type: 'pong' };

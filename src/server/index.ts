@@ -84,8 +84,10 @@ function broadcast(msg: ServerMessage) {
       try {
         client.send(payload);
       } catch (err) {
-        console.error('Failed to send to client:', err);
+        connectedClients.delete(client);
       }
+    } else if (client.readyState === 2 || client.readyState === 3) {
+      connectedClients.delete(client);
     }
   }
 }
@@ -798,27 +800,42 @@ TELEGRAM_NOTIFY_ON_COMPLETE=${process.env.TELEGRAM_NOTIFY_ON_COMPLETE || 'false'
   });
 
   // WebSocket route for real-time interaction
-  app.get('/ws', { websocket: true }, async (socket, req) => {
+  app.get('/ws', { websocket: true }, (socket, req) => {
     connectedClients.add(socket);
 
-    // Send initial state on connection
-    const currentStatus = await getLiveSystemStatus();
-    const sessions = await listPocketSessions();
-    const agySessions = await listLocalAgySessions();
-    const initMsg: ServerMessage = {
-      type: 'init_state',
-      messages: activeSession.messages,
-      terminalLogs: (activeSession.terminalLogs || []).slice(-20),
-      status: currentStatus,
-      sessions,
-      agySessions,
-      activeSessionId: activeSession.id,
-    };
-    socket.send(JSON.stringify(initMsg));
+    // Send initial state asynchronously without delaying message listener registration
+    (async () => {
+      try {
+        const currentStatus = await getLiveSystemStatus();
+        const sessions = await listPocketSessions();
+        const agySessions = await listLocalAgySessions();
+        const initMsg: ServerMessage = {
+          type: 'init_state',
+          messages: activeSession.messages,
+          terminalLogs: (activeSession.terminalLogs || []).slice(-20),
+          status: currentStatus,
+          sessions,
+          agySessions,
+          activeSessionId: activeSession.id,
+        };
+        if (socket.readyState === 1 /* OPEN */) {
+          socket.send(JSON.stringify(initMsg));
+        }
+      } catch (err) {
+        console.error('Error sending init_state:', err);
+      }
+    })();
 
     socket.on('message', async (raw: Buffer) => {
       try {
         const clientMsg: ClientMessage = JSON.parse(raw.toString('utf-8'));
+
+        if (clientMsg.type === 'ping') {
+          try {
+            socket.send(JSON.stringify({ type: 'pong' } as ServerMessage));
+          } catch {}
+          return;
+        }
 
         // Check PIN security if configured
         const currentPin = process.env.ACCESS_PIN?.trim();

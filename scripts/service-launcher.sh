@@ -23,6 +23,8 @@ TUNNEL_PID=$!
 cleanup() {
   echo "[$(date)] Stopping PocketBridge Service (PID $$)..." >> "$HOME/Library/Logs/pocketbridge-service.log"
   kill -TERM "$TUNNEL_PID" 2>/dev/null || true
+  kill -TERM "$SERVER_PID" 2>/dev/null || true
+  pkill -P $$ 2>/dev/null || true
   exit 0
 }
 trap cleanup SIGINT SIGTERM SIGHUP

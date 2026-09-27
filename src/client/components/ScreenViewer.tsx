@@ -3,6 +3,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card.j
 import { Button } from '@/components/ui/button.js';
 import { Camera, Maximize2, Minimize2, RefreshCw, Image as ImageIcon, Download, Trash2, Minus } from 'lucide-react';
 import { Dialog, DialogContent } from '@/components/ui/dialog.js';
+import { fetchWithRetry } from '@/lib/fetchWithRetry.js';
 
 interface ScreenViewerProps {
   latestUrl: string | null;
@@ -33,7 +34,7 @@ export const ScreenViewer: React.FC<ScreenViewerProps> = ({
 
   const fetchCaptures = async () => {
     try {
-      const res = await fetch('/api/captures');
+      const res = await fetchWithRetry('/api/captures', { retries: 2, retryDelay: 500 });
       const data = await res.json();
       if (data.captures) {
         setHistory(data.captures);
@@ -60,7 +61,7 @@ export const ScreenViewer: React.FC<ScreenViewerProps> = ({
   const handleDelete = async (filename: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     try {
-      await fetch(`/api/captures/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+      await fetchWithRetry(`/api/captures/${encodeURIComponent(filename)}`, { method: 'DELETE', retries: 2, retryDelay: 500 });
       const nextHistory = history.filter((h) => h.filename !== filename);
       setHistory(nextHistory);
       if (selectedUrl && selectedUrl.includes(filename)) {

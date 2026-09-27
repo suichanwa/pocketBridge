@@ -23,11 +23,55 @@ export function useAgentSocket() {
 
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<any>(null);
+  const pingIntervalRef = useRef<any>(null);
+  const pongTimeoutRef = useRef<any>(null);
+  const hiddenTimeRef = useRef<number>(0);
+  const reconnectAttemptsRef = useRef<number>(0);
   const savedPinRef = useRef<string>(localStorage.getItem('pb_pin') || '');
 
-  const connect = useCallback(() => {
-    if (socketRef.current && (socketRef.current.readyState === WebSocket.CONNECTING || socketRef.current.readyState === WebSocket.OPEN)) {
+  const cleanupSocket = useCallback(() => {
+    if (socketRef.current) {
+      try {
+        socketRef.current.onopen = null;
+        socketRef.current.onmessage = null;
+        socketRef.current.onerror = null;
+        socketRef.current.onclose = null;
+        socketRef.current.close();
+      } catch {}
+      socketRef.current = null;
+    }
+    clearTimeout(pongTimeoutRef.current);
+    clearInterval(pingIntervalRef.current);
+  }, []);
+
+  const sendPing = useCallback(() => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      try {
+        socketRef.current.send(JSON.stringify({ type: 'ping' } as ClientMessage));
+        clearTimeout(pongTimeoutRef.current);
+        pongTimeoutRef.current = setTimeout(() => {
+          console.warn('Heartbeat timeout; closing dead socket and reconnecting...');
+          cleanupSocket();
+          setIsConnected(false);
+          connect(true);
+        }, 8000);
+      } catch {
+        cleanupSocket();
+        setIsConnected(false);
+        connect(true);
+      }
+    }
+  }, [cleanupSocket]);
+
+  const connect = useCallback((forceFresh: boolean = false) => {
+    clearTimeout(reconnectTimeoutRef.current);
+
+    if (!forceFresh && socketRef.current && (socketRef.current.readyState === WebSocket.CONNECTING || socketRef.current.readyState === WebSocket.OPEN)) {
       return;
+    }
+
+    if (forceFresh) {
+      cleanupSocket();
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -39,14 +83,24 @@ export function useAgentSocket() {
 
     ws.onopen = () => {
       setIsConnected(true);
+      reconnectAttemptsRef.current = 0;
       if (savedPinRef.current) {
         ws.send(JSON.stringify({ type: 'verify_pin', pin: savedPinRef.current } as ClientMessage));
       }
+
+      // Start periodic 15-second heartbeat
+      clearInterval(pingIntervalRef.current);
+      pingIntervalRef.current = setInterval(sendPing, 15000);
     };
 
     ws.onmessage = (event) => {
+      clearTimeout(pongTimeoutRef.current);
+
       try {
         const msg: ServerMessage = JSON.parse(event.data);
+        if (msg.type === 'pong') {
+          return;
+        }
 
         switch (msg.type) {
           case 'init_state':
@@ -179,40 +233,77 @@ export function useAgentSocket() {
 
     ws.onclose = () => {
       setIsConnected(false);
-      socketRef.current = null;
-      // Auto-reconnect after 2 seconds
+      cleanupSocket();
+
+      // Exponential backoff reconnect: 1s, 1.5s, 2.25s, max 5s
+      const delay = Math.min(1000 * Math.pow(1.5, reconnectAttemptsRef.current), 5000);
+      reconnectAttemptsRef.current += 1;
       clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = setTimeout(connect, 2000);
+      reconnectTimeoutRef.current = setTimeout(() => connect(false), delay);
     };
 
     ws.onerror = (err) => {
-      console.error('WebSocket connection error:', err);
-      ws.close();
+      console.warn('WebSocket connection error:', err);
+      try {
+        ws.close();
+      } catch {}
     };
-  }, []);
+  }, [cleanupSocket, sendPing]);
 
   useEffect(() => {
     connect();
 
     // Reconnect immediately when mobile browser comes back to foreground
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        connect();
+      if (document.visibilityState === 'hidden') {
+        hiddenTimeRef.current = Date.now();
+      } else if (document.visibilityState === 'visible') {
+        const elapsed = hiddenTimeRef.current > 0 ? Date.now() - hiddenTimeRef.current : 0;
+        hiddenTimeRef.current = 0;
+
+        if (elapsed > 2000) {
+          // Tab was backgrounded for more than 2 seconds.
+          // Mobile OS / Tailscale tunnel likely disconnected. Force clean reconnect.
+          cleanupSocket();
+          setIsConnected(false);
+          // Wait 250ms for mobile OS network / VPN handshake to complete
+          clearTimeout(reconnectTimeoutRef.current);
+          reconnectTimeoutRef.current = setTimeout(() => {
+            connect(true);
+          }, 250);
+        } else {
+          // Test socket liveness immediately
+          if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+            sendPing();
+          } else {
+            connect(true);
+          }
+        }
       }
+    };
+
+    const handleOnline = () => {
+      reconnectAttemptsRef.current = 0;
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = setTimeout(() => {
+        connect(true);
+      }, 200);
     };
 
     window.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('focus', handleVisibilityChange);
+    window.addEventListener('pageshow', handleVisibilityChange);
+    window.addEventListener('online', handleOnline);
 
     return () => {
       window.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('focus', handleVisibilityChange);
+      window.removeEventListener('pageshow', handleVisibilityChange);
+      window.removeEventListener('online', handleOnline);
       clearTimeout(reconnectTimeoutRef.current);
-      if (socketRef.current) {
-        socketRef.current.close();
-      }
+      cleanupSocket();
     };
-  }, [connect]);
+  }, [connect, cleanupSocket, sendPing]);
 
   const clearChat = useCallback(() => {
     setMessages([]);
