@@ -107,9 +107,9 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({ content }) => {
   };
 
   const formatInline = (text: string): React.ReactNode[] => {
-    // Regex splits by `code`, **bold**, *italic*, ![img](url), /captures/ images, and URLs
+    // Regex splits by `code`, **bold**, *italic*, ![img](url), [text](url), /captures/ images, and URLs
     const parts: React.ReactNode[] = [];
-    const regex = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|!\[[^\]]*\]\([^)]+\)|\/captures\/[a-zA-Z0-9_\-.]+\.(?:png|jpg|jpeg|webp)|https?:\/\/[^\s]+)/gi;
+    const regex = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)|\/captures\/[a-zA-Z0-9_\-.]+\.(?:png|jpg|jpeg|webp)|https?:\/\/[^\s<>)"]+)/gi;
     let lastIndex = 0;
     let match;
 
@@ -151,6 +151,36 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({ content }) => {
             />
           );
         }
+      } else if (matchText.startsWith('[') && matchText.includes('](')) {
+        const linkMatch = matchText.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+        if (linkMatch) {
+          const label = linkMatch[1];
+          let href = linkMatch[2].trim();
+
+          // Resolve local workspace file links to GitHub URLs for browser accessibility
+          if (href.startsWith('file:///Users/suiseika/pocketBridge/')) {
+            const rel = href.replace('file:///Users/suiseika/pocketBridge/', '');
+            href = `https://github.com/suichanwa/pocketBridge/blob/main/${rel}`;
+          } else if (href.startsWith('file:///Users/suiseika/porfoliooo/')) {
+            const rel = href.replace('file:///Users/suiseika/porfoliooo/', '');
+            href = `https://github.com/suichanwa/porfoliooo/blob/main/${rel}`;
+          } else if (href.startsWith('file://')) {
+            const cleanPath = href.replace(/^file:\/\//, '');
+            href = `/api/files/text?path=${encodeURIComponent(cleanPath)}`;
+          }
+
+          parts.push(
+            <a
+              key={match.index}
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              className="text-primary underline hover:text-primary/80 font-medium"
+            >
+              {label}
+            </a>
+          );
+        }
       } else if (matchText.startsWith('/captures/')) {
         parts.push(
           <span key={match.index} className="block my-1.5">
@@ -162,17 +192,28 @@ export const MarkdownView: React.FC<MarkdownViewProps> = ({ content }) => {
           </span>
         );
       } else if (matchText.startsWith('http')) {
+        let url = matchText;
+        let trailingPunct = '';
+        const punctMatch = url.match(/[.,!?:;]+$/);
+        if (punctMatch) {
+          trailingPunct = punctMatch[0];
+          url = url.slice(0, -trailingPunct.length);
+        }
+
         parts.push(
           <a
             key={match.index}
-            href={matchText}
+            href={url}
             target="_blank"
             rel="noreferrer"
             className="text-primary underline hover:text-primary/80"
           >
-            {matchText}
+            {url}
           </a>
         );
+        if (trailingPunct) {
+          parts.push(trailingPunct);
+        }
       }
       lastIndex = regex.lastIndex;
     }
