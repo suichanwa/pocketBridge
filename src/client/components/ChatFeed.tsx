@@ -45,6 +45,7 @@ import {
 } from 'lucide-react';
 import { MarkdownView } from './MarkdownView.js';
 import { fetchWithRetry } from '@/lib/fetchWithRetry.js';
+import { copyImageToClipboard } from '@/lib/copyContent.js';
 import type { ChatMessage, ToolCallRecord, SystemStatus } from '../../shared/types.js';
 
 interface CommandOption {
@@ -173,6 +174,7 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
   const [micError, setMicError] = useState<string | null>(null);
   const [secureModalOpen, setSecureModalOpen] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [imageCopied, setImageCopied] = useState(false);
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -1193,6 +1195,22 @@ export const ChatFeed: React.FC<ChatFeedProps> = ({
                 >
                   <Download className="w-4 h-4 text-sky-400" />
                 </a>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (previewImageUrl) {
+                      const res = await copyImageToClipboard(previewImageUrl);
+                      if (res.clientSuccess || res.macSuccess) {
+                        setImageCopied(true);
+                        setTimeout(() => setImageCopied(false), 2000);
+                      }
+                    }
+                  }}
+                  title="Copy Image Content to Clipboard"
+                  className="text-muted-foreground hover:text-foreground flex items-center justify-center bg-secondary/80 hover:bg-secondary h-8 w-8 rounded-lg border border-border/40 transition-colors"
+                >
+                  {imageCopied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-sky-400" />}
+                </button>
               </div>
             </div>
           )}

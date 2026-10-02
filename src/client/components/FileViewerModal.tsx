@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import type { FileItem, FileTextPreview } from '../../shared/types.js';
 import { fetchWithRetry } from '@/lib/fetchWithRetry.js';
+import { copyImageToClipboard, copyTextToClipboard } from '@/lib/copyContent.js';
 import { Button } from '@/components/ui/button.js';
 import { Badge } from '@/components/ui/badge.js';
 import { ScrollArea } from '@/components/ui/scroll-area.js';
@@ -165,24 +166,44 @@ export const FileViewerModal: React.FC<FileViewerModalProps> = ({
 
   const handleCopy = async () => {
     try {
-      if (category === 'text' && textPreview && !textPreview.isBinary) {
-        await navigator.clipboard.writeText(textPreview.content);
-      } else {
-        await navigator.clipboard.writeText(file.path);
+      if (category === 'image') {
+        const result = await copyImageToClipboard(rawUrl, file.path);
+        if (result.clientSuccess || result.macSuccess) {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+          return;
+        }
       }
+
+      if (category === 'text') {
+        let contentToCopy = textPreview?.content;
+        if (!contentToCopy) {
+          const res = await fetchWithRetry(`/api/files/text?path=${encodeURIComponent(file.path)}`);
+          if (res.ok) {
+            const data: FileTextPreview = await res.json();
+            contentToCopy = data.content;
+          }
+        }
+        if (contentToCopy !== undefined) {
+          await copyTextToClipboard(contentToCopy, file.path);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+          return;
+        }
+      }
+
+      await copyTextToClipboard(file.path, file.path);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Fallback if clipboard API is restricted
-      const textarea = document.createElement('textarea');
-      textarea.value = (category === 'text' && textPreview?.content) || file.path;
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setCopied(false);
     }
+  };
+
+  const getCopyTooltip = () => {
+    if (category === 'image') return 'Copy image content to clipboard';
+    if (category === 'text') return 'Copy file content';
+    return 'Copy file path';
   };
 
   const getHeaderIcon = () => {
@@ -287,7 +308,7 @@ export const FileViewerModal: React.FC<FileViewerModalProps> = ({
               size="icon"
               onClick={handleCopy}
               className="h-7 w-7 text-muted-foreground hover:text-foreground"
-              title={category === 'text' ? 'Copy content' : 'Copy file path'}
+              title={getCopyTooltip()}
             >
               {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
             </Button>

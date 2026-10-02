@@ -238,10 +238,10 @@ async function testMultiturnSimulation() {
   assert(projected[0].parts.some((p) => p.text?.includes('Project Goal: Monitor pocketBridge')));
 
   // Verify Tier 2: Turn 1 and Turn 2 tool calls compacted into text
-  // No functionCall or functionResponse should exist in the first half of projected
-  const midPoint = Math.floor(projected.length / 2);
-  const firstHalf = projected.slice(0, midPoint);
-  for (const item of firstHalf) {
+  // No functionCall or functionResponse should exist in older turns (Turn 1 and Turn 2 are rolled up into 4 items)
+  const olderTurns = projected.slice(0, 4);
+  assert.equal(olderTurns.length, 4, 'Older turns 1 and 2 should be rolled up into 4 conversational turns');
+  for (const item of olderTurns) {
     for (const part of item.parts) {
       assert(!part.functionCall, 'Older turns must NOT have raw functionCall objects');
       assert(!part.functionResponse, 'Older turns must NOT have raw functionResponse objects');

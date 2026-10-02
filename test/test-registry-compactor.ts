@@ -251,8 +251,7 @@ async function runTests() {
   // Find where git status was compacted
   const allText = projected.flatMap((p) => p.parts.map((part) => part.text || '')).join('\n');
   assert(
-    allText.includes('git: modified: src/server/agent.ts, src/server/tools/shell.ts | untracked: src/server/context/compactor.ts') ||
-    allText.includes('modified: src/server/agent.ts'),
+    allText.includes('git: modified: src/server/agent.ts, src/server/tools/shell.ts | untracked: src/server/context/compactor.ts'),
     'Git status output should be compacted into modified/untracked files'
   );
 
@@ -304,6 +303,73 @@ async function runTests() {
   const agent = new PocketAgent('fake-api-key', 'flash');
   const registeredInAgent = agent.getToolRegistry().getDeclarations();
   assert(registeredInAgent.length >= 8, 'Agent tool registry should have all registered tools');
+
+  console.log('[TEST] 14. Testing leading model turn filtering (welcome message)...');
+  const welcomeHistory = [
+    { role: 'model', parts: [{ text: 'Welcome to PocketBridge! I can help you.' }] },
+    { role: 'user', parts: [{ text: 'Hello, what can you do?' }] },
+    { role: 'model', parts: [{ text: 'I can run commands.' }] },
+  ];
+  const projectedWelcome = ContextCompactor.project(welcomeHistory as any);
+  assert.equal(projectedWelcome[0].role, 'user', 'Projected history must always start with user role');
+  assert(
+    projectedWelcome[0].parts.some((p) => p.text?.includes('Hello, what can you do?')),
+    'First projected turn must be the initial user question'
+  );
+
+  console.log('[TEST] 15. Testing 12-turn session Immutable Anchor retention...');
+  const longSession: Content[] = [
+    { role: 'user', parts: [{ text: 'Root Anchor Goal: Build the iOS app release.' }] },
+    { role: 'model', parts: [{ text: 'Understood, starting release build.' }] },
+  ];
+  for (let i = 1; i <= 10; i++) {
+    longSession.push({
+      role: 'user',
+      parts: [{ text: `Turn ${i}: Check step ${i}` }],
+    });
+    longSession.push({
+      role: 'model',
+      parts: [{ text: `Step ${i} completed.` }],
+    });
+  }
+  const projectedLong = ContextCompactor.project(longSession, {
+    workspaceDir: '/Users/suiseika/pocketBridge',
+    maxWorkingTurns: 3,
+  });
+  assert.equal(projectedLong[0].role, 'user', 'First turn of long session must be user');
+  assert(
+    projectedLong[0].parts.some((p) => p.text?.includes('Root Anchor Goal: Build the iOS app release.')),
+    'Root user goal must remain in Tier 1 even after 10+ turns'
+  );
+  assert(
+    projectedLong[0].parts.some((p) => p.text?.includes('Workspace: /Users/suiseika/pocketBridge')),
+    'Workspace anchor must be preserved in Tier 1'
+  );
+
+  console.log('[TEST] 16. Testing ToolRegistry abort listener and timer cleanup on error...');
+  const abortController = new AbortController();
+  const testRegistry = new ToolRegistry();
+  testRegistry.register({
+    name: 'failing_tool',
+    description: 'Throws error immediately',
+    category: 'system',
+    parameters: { type: 'OBJECT' as any, properties: {} },
+    execute: async () => {
+      throw new Error('Immediate tool failure');
+    },
+  });
+
+  await assert.rejects(
+    async () => {
+      await testRegistry.execute('failing_tool', {}, {
+        sessionId: 'test',
+        workspaceDir: process.cwd(),
+        abortSignal: abortController.signal,
+      });
+    },
+    /Immediate tool failure/,
+    'Should propagate error'
+  );
 
   console.log('\n[PASS] All ToolRegistry and ContextCompactor unit tests passed successfully!\n');
 }

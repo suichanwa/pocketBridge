@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { execSync, spawn } from 'node:child_process';
 import type { FileItem, FileTextPreview } from '../shared/types.js';
 
 const USER_HOME = os.homedir();
@@ -277,3 +278,64 @@ export async function readTextFilePreview(
     linesCount,
   };
 }
+
+/**
+ * Copies a file's content directly to the macOS system pasteboard.
+ * For images, writes native image bitmap data (PNG/JPEG/TIFF).
+ * For text, writes text content via pbcopy.
+ */
+export async function copyFileToMacClipboard(
+  inputPath: string,
+  preferredType?: 'image' | 'text'
+): Promise<{ success: boolean; type: 'image' | 'text'; message: string }> {
+  let safePath: string;
+
+  if (inputPath.startsWith('/captures/')) {
+    safePath = path.join(PROJECT_ROOT, 'captures', path.basename(inputPath));
+  } else {
+    safePath = resolveSafePath(inputPath);
+  }
+
+  if (!fsSync.existsSync(safePath)) {
+    throw new Error(`File does not exist: ${safePath}`);
+  }
+
+  const stat = await fs.stat(safePath);
+  if (stat.isDirectory()) {
+    throw new Error(`Cannot copy directory to clipboard: ${safePath}`);
+  }
+
+  const ext = path.extname(safePath).replace(/^\./, '').toLowerCase();
+  const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tiff', 'tif', 'ico'];
+
+  if (preferredType === 'image' || imageExts.includes(ext)) {
+    if (ext === 'png') {
+      execSync(`osascript -e 'set the clipboard to (read (POSIX file "${safePath}") as «class PNGf»)'`);
+    } else if (ext === 'jpg' || ext === 'jpeg') {
+      execSync(`osascript -e 'set the clipboard to (read (POSIX file "${safePath}") as JPEG picture)'`);
+    } else if (ext === 'gif') {
+      execSync(`osascript -e 'set the clipboard to (read (POSIX file "${safePath}") as GIF picture)'`);
+    } else {
+      const tmpPng = path.join(os.tmpdir(), `pb_clip_${Date.now()}.png`);
+      try {
+        execSync(`sips -s format png "${safePath}" --out "${tmpPng}" >/dev/null 2>&1`);
+        execSync(`osascript -e 'set the clipboard to (read (POSIX file "${tmpPng}") as «class PNGf»)'`);
+      } finally {
+        try {
+          fsSync.unlinkSync(tmpPng);
+        } catch {
+          // ignore temp cleanup error
+        }
+      }
+    }
+    return { success: true, type: 'image', message: 'Image copied to macOS clipboard' };
+  } else {
+    const content = await fs.readFile(safePath, 'utf-8');
+    const proc = spawn('pbcopy');
+    proc.stdin.write(content);
+    proc.stdin.end();
+    await new Promise((resolve) => proc.on('close', resolve));
+    return { success: true, type: 'text', message: 'Text copied to macOS clipboard' };
+  }
+}
+

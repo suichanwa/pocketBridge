@@ -818,22 +818,51 @@ export class PocketAgent {
       const ai = new GoogleGenAI({ apiKey: this.apiKey });
       const model = 'gemini-flash-latest';
 
-      // Build conversation contents for Gemini
+      // Build conversation contents from session history
       const conversationContents: any[] = [];
 
-      // Add recent history context (up to last 10 messages)
-      const recentHistory = history.slice(-10);
-      for (const msg of recentHistory) {
+      // Filter out the pending assistant placeholder message and any trailing matching user message
+      const pastMessages = history.filter((msg) => msg.id !== assistantMessageId);
+      if (
+        pastMessages.length > 0 &&
+        pastMessages[pastMessages.length - 1].role === 'user' &&
+        pastMessages[pastMessages.length - 1].content === userText
+      ) {
+        pastMessages.pop();
+      }
+
+      for (const msg of pastMessages) {
         if (msg.role === 'user') {
           conversationContents.push({
             role: 'user',
             parts: [{ text: msg.content }],
           });
-        } else if (msg.role === 'assistant' && msg.content) {
-          conversationContents.push({
-            role: 'model',
-            parts: [{ text: msg.content }],
-          });
+        } else if (msg.role === 'assistant') {
+          if (msg.toolCalls && msg.toolCalls.length > 0) {
+            for (const tc of msg.toolCalls) {
+              conversationContents.push({
+                role: 'model',
+                parts: [{ functionCall: { name: tc.name, args: tc.args || {} } }],
+              });
+              conversationContents.push({
+                role: 'user',
+                parts: [
+                  {
+                    functionResponse: {
+                      name: tc.name,
+                      response: { output: tc.result || tc.error || 'Completed' },
+                    },
+                  },
+                ],
+              });
+            }
+          }
+          if (msg.content) {
+            conversationContents.push({
+              role: 'model',
+              parts: [{ text: msg.content }],
+            });
+          }
         }
       }
 
@@ -1019,6 +1048,8 @@ ${this.cavemanMode !== 'off' ? `\nCAVEMAN ${this.cavemanMode.toUpperCase()} MODE
           const ctx: ToolContext = {
             sessionId: sessionId || 'default-session',
             workspaceDir: process.env.WORKSPACE_ROOT || process.cwd(),
+            conversationId: agyConversationId,
+            onConversationId: (id) => callbacks.onConversationId?.(id),
             onStreamChunk: (chunk: string) => {
               if (logId) {
                 callbacks.onTerminalChunk(logId, chunk);

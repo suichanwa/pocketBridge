@@ -40,6 +40,7 @@ import {
   deleteFileSystemItem,
   getMimeType,
   readTextFilePreview,
+  copyFileToMacClipboard,
 } from './files.js';
 import { startTunnel, getTunnelUrl } from './tunnel.js';
 
@@ -787,6 +788,21 @@ async function startServer() {
     } catch (err: any) {
       reply.status(400);
       return { error: err?.message };
+    }
+  });
+
+  app.post('/api/files/copy-mac-clipboard', async (req, reply) => {
+    try {
+      const body = req.body as { path?: string; type?: 'image' | 'text' };
+      if (!body || !body.path) {
+        reply.status(400);
+        return { error: 'path is required' };
+      }
+      const result = await copyFileToMacClipboard(body.path, body.type);
+      return result;
+    } catch (err: any) {
+      reply.status(500);
+      return { error: err?.message || 'Failed to copy to macOS clipboard' };
     }
   });
 

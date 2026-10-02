@@ -269,6 +269,8 @@ export const runAgyTaskTool: AgentTool<{ prompt: string; model?: string }, RunAg
       prompt,
       model,
       cwd: ctx.workspaceDir,
+      conversationId: ctx.conversationId,
+      onConversationId: ctx.onConversationId,
       onChunk: ctx.onStreamChunk,
     });
     return {

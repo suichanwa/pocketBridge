@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card.js';
 import { Button } from '@/components/ui/button.js';
-import { Camera, Maximize2, Minimize2, RefreshCw, Image as ImageIcon, Download, Trash2, Minus } from 'lucide-react';
+import { Camera, Maximize2, Minimize2, RefreshCw, Image as ImageIcon, Download, Trash2, Minus, Copy, Check } from 'lucide-react';
 import { Dialog, DialogContent } from '@/components/ui/dialog.js';
 import { fetchWithRetry } from '@/lib/fetchWithRetry.js';
+import { copyImageToClipboard } from '@/lib/copyContent.js';
 
 interface ScreenViewerProps {
   latestUrl: string | null;
@@ -23,6 +24,7 @@ export const ScreenViewer: React.FC<ScreenViewerProps> = ({
   isMaximized,
 }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [history, setHistory] = useState<Array<{ filename: string; url: string }>>([]);
   const [selectedUrl, setSelectedUrl] = useState<string | null>(latestUrl);
 
@@ -233,6 +235,22 @@ export const ScreenViewer: React.FC<ScreenViewerProps> = ({
                 >
                   <Download className="w-4 h-4" />
                 </a>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (activeImage) {
+                      const res = await copyImageToClipboard(activeImage);
+                      if (res.clientSuccess || res.macSuccess) {
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 2000);
+                      }
+                    }
+                  }}
+                  className="p-1.5 rounded-md text-muted-foreground hover:text-foreground bg-secondary/80 flex items-center justify-center transition-colors"
+                  title="Copy Image Content to Clipboard"
+                >
+                  {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                </button>
                 {activeFilename && (
                   <button
                     type="button"

@@ -153,14 +153,18 @@ function squashSearchResults(results: any): string {
  * Formats tool results into concise single-line semantic facts.
  */
 function squashGenericResult(toolName: string, args: any, result: any): string {
-  if (!result) return 'Completed';
+  if (!result && result !== 0) return 'Completed';
 
   if (toolName === 'execute_command') {
     const cmd = args?.command || (typeof result === 'object' ? result?.command : '') || '';
     const output =
-      typeof result === 'object' ? (result.output ?? JSON.stringify(result)) : String(result);
+      typeof result === 'object' && result?.output !== undefined
+        ? result.output
+        : typeof result === 'string'
+        ? result
+        : JSON.stringify(result);
     const exitCode = typeof result === 'object' ? result.exitCode : undefined;
-    return squashShellOutput(cmd, output, exitCode);
+    return squashShellOutput(cmd, String(output || ''), exitCode);
   }
 
   if (toolName === 'search_web') {
@@ -174,7 +178,7 @@ function squashGenericResult(toolName: string, args: any, result: any): string {
 
   if (toolName === 'run_agy_task') {
     const exit = result?.exitCode ?? (result?.status === 'success' ? 0 : 1);
-    const model = result?.model || 'agy';
+    const model = result?.model || args?.model || 'gemini-3.8-flash-high';
     const output = String(result?.output || result?.result || '');
     const clean = output.replace(/\n+/g, ' ').trim();
     const shortOut = clean.length > 180 ? `${clean.slice(0, 180)}...` : clean;
@@ -218,6 +222,117 @@ function fallbackSafeTruncation(contents: Content[]): Content[] {
   }));
 }
 
+/**
+ * Groups a sequence of contents into user-initiated interactions.
+ * A new interaction starts when a user turn contains prompt text or images
+ * (and is not purely a tool response callback).
+ */
+function groupIntoInteractions(contents: Content[]): Content[][] {
+  const interactions: Content[][] = [];
+  let current: Content[] = [];
+
+  for (const item of contents) {
+    const isUserPrompt =
+      item.role === 'user' &&
+      item.parts.some((p) => p.text !== undefined || p.inlineData !== undefined) &&
+      !item.parts.every((p) => p.functionResponse !== undefined);
+
+    if (isUserPrompt && current.length > 0) {
+      interactions.push(current);
+      current = [];
+    }
+    current.push(item);
+  }
+
+  if (current.length > 0) {
+    interactions.push(current);
+  }
+
+  return interactions;
+}
+
+/**
+ * Rolls up a Tier 2 interaction into plain conversational text turns:
+ * user: requested X -> model: executed Y with result Z
+ * Strips raw structural functionCall and functionResponse objects completely.
+ */
+function compactTier2Interaction(items: Content[]): Content[] {
+  if (items.length === 0) return [];
+
+  const userItem = items[0];
+  const userParts: ContentPart[] = [];
+
+  for (const p of userItem.parts) {
+    if (p.inlineData) {
+      userParts.push({ text: '[Attached image: inspected in earlier turn]' });
+    } else if (p.text) {
+      const trimmed = p.text.trim();
+      if (trimmed.length > 300) {
+        userParts.push({ text: `${trimmed.slice(0, 250)}... [history summarized]` });
+      } else {
+        userParts.push({ text: trimmed });
+      }
+    }
+  }
+
+  if (userParts.length === 0) {
+    userParts.push({ text: 'User request' });
+  }
+
+  const actions: string[] = [];
+  const modelTexts: string[] = [];
+
+  const functionCalls: { name: string; args?: any }[] = [];
+  const functionResponses: { name: string; response?: any }[] = [];
+
+  for (let i = 1; i < items.length; i++) {
+    const item = items[i];
+    for (const part of item.parts) {
+      if (part.functionCall) {
+        functionCalls.push(part.functionCall);
+      } else if (part.functionResponse) {
+        functionResponses.push(part.functionResponse);
+      } else if (part.text && item.role === 'model') {
+        const t = part.text.trim();
+        if (t) {
+          modelTexts.push(t.length > 250 ? `${t.slice(0, 200)}...` : t);
+        }
+      }
+    }
+  }
+
+  // Pair functionCalls with matching functionResponses
+  for (let i = 0; i < functionCalls.length; i++) {
+    const call = functionCalls[i];
+    const resp = functionResponses.find((r) => r.name === call.name) || functionResponses[i];
+    const argStr = JSON.stringify(call.args || {});
+    const shortArgs = argStr.length > 80 ? `${argStr.slice(0, 80)}...` : argStr;
+    const squashedRes = squashGenericResult(
+      call.name,
+      call.args,
+      resp?.response?.output ?? resp?.response
+    );
+    actions.push(`[Action: ${call.name}(${shortArgs}) -> Result: ${squashedRes}]`);
+  }
+
+  // Handle any unpaired responses if present
+  for (let i = functionCalls.length; i < functionResponses.length; i++) {
+    const resp = functionResponses[i];
+    const squashedRes = squashGenericResult(resp.name, {}, resp?.response?.output ?? resp?.response);
+    actions.push(`[Result of ${resp.name}: ${squashedRes}]`);
+  }
+
+  const modelLines = [...actions, ...modelTexts];
+  if (modelLines.length === 0) {
+    modelLines.push('Completed.');
+  }
+
+  return [
+    { role: 'user', parts: userParts },
+    { role: 'model', parts: [{ text: modelLines.join('\n') }] },
+  ];
+}
+
 export class ContextCompactor {
   /**
    * Projects an uncompressed conversational contents array into a 3-tier
@@ -225,10 +340,11 @@ export class ContextCompactor {
    *
    * Invariants:
    * 1. Never mutates input contents or persisted session JSON.
-   * 2. Preserves strict user-model alternation.
+   * 2. Preserves strict user-model alternation and always starts with user.
    * 3. Completely rolls up Tier 2 tool calls into plain text to eliminate Gemini 400 errors.
    * 4. Retains full fidelity and active images for Tier 3 (last 3 turns).
    * 5. Ephemeral vision retention: strips base64 for images older than the immediate preceding turn.
+   * 6. Preserves Tier 1 Immutable Anchor (root user goal + workspace context).
    */
   public static project(rawContents: any[], options: CompactorOptions = {}): Content[] {
     if (!Array.isArray(rawContents) || rawContents.length === 0) {
@@ -236,8 +352,8 @@ export class ContextCompactor {
     }
 
     try {
-      // 1. Normalize input into uniform Content[] structure
-      const contents: Content[] = rawContents.map((item) => {
+      // 1. Normalize input into uniform Content[] structure (deep copy)
+      let contents: Content[] = rawContents.map((item) => {
         if (item.parts && Array.isArray(item.parts)) {
           return {
             role: item.role === 'assistant' ? 'model' : item.role === 'model' ? 'model' : 'user',
@@ -253,115 +369,115 @@ export class ContextCompactor {
         };
       });
 
+      // Filter out leading model turns (such as welcome messages) so contents always starts with user
+      let firstUserIndex = 0;
+      while (firstUserIndex < contents.length && contents[firstUserIndex].role === 'model') {
+        firstUserIndex++;
+      }
+      if (firstUserIndex > 0) {
+        contents = contents.slice(firstUserIndex);
+      }
+      if (contents.length === 0) {
+        return [];
+      }
+
       const maxWorkingTurns = options.maxWorkingTurns ?? 3;
 
-      // 2. Identify user-initiated turn starting boundaries
-      const userTurnIndices: number[] = [];
-      for (let i = 0; i < contents.length; i++) {
-        const item = contents[i];
-        if (item.role === 'user') {
-          const hasPromptPart = item.parts.some(
-            (p) => p.text !== undefined || p.inlineData !== undefined
-          );
-          const isPureToolResponse = item.parts.every((p) => p.functionResponse !== undefined);
-          if (hasPromptPart || !isPureToolResponse || userTurnIndices.length === 0) {
-            userTurnIndices.push(i);
-          }
-        }
+      // 2. Group into user-initiated interactions
+      const interactions = groupIntoInteractions(contents);
+      if (interactions.length === 0) {
+        return [];
       }
 
-      // If 3 or fewer turns total, all items fit in Working Memory (Tier 3)
-      let tier3StartIndex = 0;
-      if (userTurnIndices.length > maxWorkingTurns) {
-        tier3StartIndex = userTurnIndices[userTurnIndices.length - maxWorkingTurns];
-      }
+      // 3. Determine tier boundaries across interactions
+      const totalInteractions = interactions.length;
+      // Working memory covers the last maxWorkingTurns interactions
+      const tier3StartIndex = Math.max(1, totalInteractions - maxWorkingTurns);
+
+      // Ephemeral Vision: identify active interaction and immediate preceding interaction
+      const activeInteractionIndex = totalInteractions - 1;
+      const immediatePrecedingInteractionIndex =
+        totalInteractions > 1 ? totalInteractions - 2 : activeInteractionIndex;
 
       const projected: Content[] = [];
 
-      // Find the index of the immediate preceding user turn for Ephemeral Vision Retention
-      const lastUserTurnIndex =
-        userTurnIndices.length > 0 ? userTurnIndices[userTurnIndices.length - 1] : contents.length - 1;
-      const immediatePrecedingUserTurnIndex =
-        userTurnIndices.length > 1 ? userTurnIndices[userTurnIndices.length - 2] : 0;
-
-      for (let i = 0; i < contents.length; i++) {
-        const item = contents[i];
-        const isTier1 = i === 0;
-        const isTier3 = i >= tier3StartIndex;
+      for (let g = 0; g < totalInteractions; g++) {
+        const interaction = interactions[g];
+        const isTier1 = g === 0;
+        const isTier3 = g >= tier3StartIndex;
 
         if (isTier1) {
-          // Tier 1 (Immutable Anchor): Root user prompt / goal
-          const clonedParts = item.parts.map((p) => {
-            if (p.inlineData && i < immediatePrecedingUserTurnIndex) {
+          // Tier 1 (Immutable Anchor): Root user prompt and workspace anchor
+          const rootUserItem = interaction[0];
+          const clonedUserParts = rootUserItem.parts.map((p) => {
+            // Apply vision retention if older than immediate preceding turn
+            if (p.inlineData && g < immediatePrecedingInteractionIndex) {
               return { text: '[Attached image: inspected in root turn]' };
             }
             return { ...p };
           });
-          projected.push({
-            role: item.role,
-            parts: clonedParts,
-          });
-        } else if (isTier3) {
-          // Tier 3 (Working Memory - last 3 turns): Full fidelity
-          const clonedParts = item.parts.map((p) => {
-            // Apply Ephemeral Vision Retention:
-            // Strip base64 image data only if older than the immediate preceding user turn
-            if (p.inlineData && i < immediatePrecedingUserTurnIndex) {
-              return { text: '[Attached image: inspected in earlier turn]' };
-            }
-            return { ...p };
-          });
-          projected.push({
-            role: item.role,
-            parts: clonedParts,
-          });
-        } else {
-          // Tier 2 (Compacted Semantic History - turns older than 3 turns)
-          // Roll up functionCall and functionResponse turns into compact conversational text
-          const compactedParts: ContentPart[] = [];
 
-          for (const part of item.parts) {
-            if (part.functionCall) {
-              const call = part.functionCall;
-              const argStr = JSON.stringify(call.args || {});
-              const shortArgs = argStr.length > 120 ? `${argStr.slice(0, 120)}...` : argStr;
-              compactedParts.push({
-                text: `[Action: ${call.name}(${shortArgs})]`,
+          // Inject workspace anchor if option provided and not already present
+          if (
+            options.workspaceDir &&
+            clonedUserParts.length > 0 &&
+            clonedUserParts[0].text &&
+            !clonedUserParts[0].text.includes('Workspace:')
+          ) {
+            clonedUserParts[0].text = `[Workspace: ${options.workspaceDir}]\n${clonedUserParts[0].text}`;
+          }
+
+          projected.push({
+            role: 'user',
+            parts: clonedUserParts,
+          });
+
+          // If the root interaction is within working memory (e.g. session has <= 3 turns),
+          // preserve its subsequent turns with full fidelity.
+          // Otherwise, if it has tool calls or model responses, roll up the rest of interaction 0 into model text.
+          if (isTier3) {
+            for (let i = 1; i < interaction.length; i++) {
+              const item = interaction[i];
+              const clonedParts = item.parts.map((p) => {
+                if (p.inlineData && g < immediatePrecedingInteractionIndex) {
+                  return { text: '[Attached image: inspected in root turn]' };
+                }
+                return { ...p };
               });
-            } else if (part.functionResponse) {
-              const resp = part.functionResponse;
-              const output = resp.response?.output ?? resp.response;
-              const squashed = squashGenericResult(resp.name, resp.response, output);
-              compactedParts.push({
-                text: `[Result of ${resp.name}: ${squashed}]`,
-              });
-            } else if (part.inlineData) {
-              compactedParts.push({
-                text: '[Attached image: inspected in earlier turn]',
-              });
-            } else if (part.text) {
-              const text = part.text.trim();
-              if (text.length > 300) {
-                compactedParts.push({
-                  text: `${text.slice(0, 250)}... [history summarized]`,
-                });
-              } else {
-                compactedParts.push({ text });
+              projected.push({ role: item.role, parts: clonedParts });
+            }
+          } else {
+            // Root interaction is older than working memory: summarize any tool calls or text into 1 model turn
+            if (interaction.length > 1) {
+              const rolled = compactTier2Interaction(interaction);
+              if (rolled.length > 1) {
+                projected.push(rolled[1]);
               }
             }
           }
-
-          if (compactedParts.length > 0) {
+        } else if (isTier3) {
+          // Tier 3 (Working Memory): Full fidelity, active images for current and immediate preceding turns
+          for (const item of interaction) {
+            const clonedParts = item.parts.map((p) => {
+              // Apply Ephemeral Vision Retention: strip base64 if older than immediate preceding turn
+              if (p.inlineData && g < immediatePrecedingInteractionIndex) {
+                return { text: '[Attached image: inspected in earlier turn]' };
+              }
+              return { ...p };
+            });
             projected.push({
               role: item.role,
-              parts: compactedParts,
+              parts: clonedParts,
             });
           }
+        } else {
+          // Tier 2 (Compacted Semantic History): Roll up interaction into plain conversational text
+          const compactedTurns = compactTier2Interaction(interaction);
+          projected.push(...compactedTurns);
         }
       }
 
-      // 3. Strict alternation normalization pass:
-      // Merge adjacent turns with identical roles to strictly prevent Gemini HTTP 400 errors
+      // 4. Strict Alternation Normalization Pass
       const normalized: Content[] = [];
       for (const item of projected) {
         if (!item.parts || item.parts.length === 0) continue;
@@ -376,24 +492,46 @@ export class ContextCompactor {
 
         const prev = normalized[normalized.length - 1];
         if (prev.role === item.role) {
-          // Check if merging text parts can be consolidated
-          const canCombineText =
-            prev.parts.length > 0 &&
-            prev.parts[prev.parts.length - 1].text !== undefined &&
-            item.parts.length > 0 &&
-            item.parts[0].text !== undefined;
+          const prevHasPureText = prev.parts.every((p) => p.text !== undefined);
+          const itemHasPureText = item.parts.every((p) => p.text !== undefined);
 
-          if (canCombineText) {
+          if (prevHasPureText && itemHasPureText) {
             prev.parts[prev.parts.length - 1].text += `\n${item.parts[0].text}`;
             prev.parts.push(...item.parts.slice(1));
           } else {
-            prev.parts.push(...item.parts);
+            // If one of them contains structural function calls or responses,
+            // separate with a minimal synthetic bridge turn to keep roles strictly alternating
+            const bridgeRole = item.role === 'user' ? 'model' : 'user';
+            const bridgeText = bridgeRole === 'model' ? 'Understood.' : 'Please continue.';
+            normalized.push({
+              role: bridgeRole,
+              parts: [{ text: bridgeText }],
+            });
+            normalized.push({
+              role: item.role,
+              parts: [...item.parts],
+            });
           }
         } else {
           normalized.push({
             role: item.role,
             parts: [...item.parts],
           });
+        }
+      }
+
+      // 5. Ensure no orphaned functionCall at the end of the history
+      if (normalized.length > 0) {
+        const lastTurn = normalized[normalized.length - 1];
+        if (lastTurn.role === 'model') {
+          for (let pIdx = 0; pIdx < lastTurn.parts.length; pIdx++) {
+            const part = lastTurn.parts[pIdx];
+            if (part.functionCall) {
+              lastTurn.parts[pIdx] = {
+                text: `[Pending action: ${part.functionCall.name}]`,
+              };
+            }
+          }
         }
       }
 

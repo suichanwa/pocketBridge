@@ -13,6 +13,8 @@ export interface ToolContext {
   workspaceDir: string;
   abortSignal?: AbortSignal;
   onStreamChunk?: (chunk: string) => void;
+  conversationId?: string;
+  onConversationId?: (id: string) => void;
 }
 
 export interface AgentTool<TArgs = any, TResult = any> {
@@ -64,9 +66,10 @@ export class ToolRegistry {
 
     const timeoutMs = Number(process.env.TOOL_TIMEOUT_MS) || 600_000;
     const startTime = Date.now();
+    let timer: NodeJS.Timeout | null = null;
+    let abortListener: (() => void) | null = null;
 
     try {
-      let timer: NodeJS.Timeout | null = null;
       const timeoutPromise = new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           reject(new Error(`Tool "${name}" execution timed out after ${timeoutMs}ms`));
@@ -77,11 +80,12 @@ export class ToolRegistry {
         ? new Promise<never>((_, reject) => {
             if (ctx.abortSignal?.aborted) {
               reject(new Error(`Tool "${name}" execution was aborted`));
-            } else {
-              ctx.abortSignal?.addEventListener('abort', () => {
-                reject(new Error(`Tool "${name}" execution was aborted`));
-              });
+              return;
             }
+            abortListener = () => {
+              reject(new Error(`Tool "${name}" execution was aborted`));
+            };
+            ctx.abortSignal?.addEventListener('abort', abortListener, { once: true });
           })
         : null;
 
@@ -90,15 +94,18 @@ export class ToolRegistry {
         races.push(abortPromise);
       }
 
-      const result = await Promise.race(races);
-      if (timer) {
-        clearTimeout(timer);
-      }
-      return result;
+      return await Promise.race(races);
     } catch (error: any) {
       const durationMs = Date.now() - startTime;
       console.error(`Tool execution error for "${name}" (${durationMs}ms):`, error?.message || error);
       throw error;
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+      if (abortListener && ctx.abortSignal) {
+        ctx.abortSignal.removeEventListener('abort', abortListener);
+      }
     }
   }
 }
