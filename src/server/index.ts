@@ -38,6 +38,8 @@ import {
   listDirectoryContents,
   resolveSafePath,
   deleteFileSystemItem,
+  getMimeType,
+  readTextFilePreview,
 } from './files.js';
 import { startTunnel, getTunnelUrl } from './tunnel.js';
 
@@ -360,7 +362,8 @@ async function drainSessionQueue(sessionId: string) {
         },
       },
       activeSession.agyConversationId,
-      task.userImages
+      task.userImages,
+      activeSession.id
     );
   } catch (err: any) {
     console.error('Error processing queued agent task:', err);
@@ -651,6 +654,75 @@ async function startServer() {
     reply.header('Content-Type', 'application/octet-stream');
     reply.header('Content-Length', stat.size);
     return reply.send(createReadStream(safePath));
+  });
+
+  // Raw file stream with HTTP Range support for inline video, audio, image, and PDF preview
+  app.get('/api/files/raw', async (req, reply) => {
+    const query = req.query as { path?: string };
+    if (!query.path) {
+      reply.status(400);
+      return { error: 'Path is required' };
+    }
+    const safePath = resolveSafePath(query.path);
+    if (!existsSync(safePath)) {
+      reply.status(404);
+      return { error: 'File not found' };
+    }
+    const stat = await fs.stat(safePath);
+    if (stat.isDirectory()) {
+      reply.status(400);
+      return { error: 'Cannot preview a directory directly' };
+    }
+
+    const mimeType = getMimeType(safePath);
+    const filename = path.basename(safePath);
+    const fileSize = stat.size;
+
+    const range = req.headers.range;
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+      if (isNaN(start) || start >= fileSize || (parts[1] && (isNaN(end) || end >= fileSize || start > end))) {
+        reply.status(416);
+        reply.header('Content-Range', `bytes */${fileSize}`);
+        return reply.send();
+      }
+
+      const chunkSize = end - start + 1;
+      reply.status(206);
+      reply.header('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+      reply.header('Accept-Ranges', 'bytes');
+      reply.header('Content-Length', chunkSize);
+      reply.header('Content-Type', mimeType);
+      reply.header('Content-Disposition', `inline; filename="${encodeURIComponent(filename)}"`);
+      return reply.send(createReadStream(safePath, { start, end }));
+    }
+
+    reply.status(200);
+    reply.header('Accept-Ranges', 'bytes');
+    reply.header('Content-Length', fileSize);
+    reply.header('Content-Type', mimeType);
+    reply.header('Content-Disposition', `inline; filename="${encodeURIComponent(filename)}"`);
+    return reply.send(createReadStream(safePath));
+  });
+
+  // Text and code file content preview route
+  app.get('/api/files/text', async (req, reply) => {
+    const query = req.query as { path?: string; maxBytes?: string };
+    if (!query.path) {
+      reply.status(400);
+      return { error: 'Path is required' };
+    }
+    try {
+      const maxBytes = query.maxBytes ? parseInt(query.maxBytes, 10) : 512 * 1024;
+      const preview = await readTextFilePreview(query.path, maxBytes);
+      return preview;
+    } catch (err: any) {
+      reply.status(400);
+      return { error: err?.message || 'Failed to read file preview' };
+    }
   });
 
   app.post('/api/chat/upload', async (req, reply) => {

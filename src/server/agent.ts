@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 import { takeMacScreenshot } from './tools/screenshot.js';
 import { takeCameraPhoto } from './tools/camera.js';
 import { executeShellCommand } from './tools/shell.js';
@@ -16,6 +16,8 @@ import {
   openApp,
   getDisplayDimensions,
 } from './tools/cursor.js';
+import { ToolRegistry, createDefaultToolRegistry, type ToolContext } from './tools/registry.js';
+import { ContextCompactor } from './context/compactor.js';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
@@ -43,214 +45,12 @@ export interface AgentCallbacks {
   onConversationId?: (agyConversationId: string) => void;
 }
 
-// Function declarations for Gemini Tool Calling
-const agentToolDeclarations = [
-  {
-    name: 'take_screenshot',
-    description: 'Takes a real-time screenshot of the Mac screen/running apps and returns the image URL so the user can view it on their phone.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        windowOnly: {
-          type: Type.BOOLEAN,
-          description: 'If true, captures the active frontmost window instead of the entire screen.',
-        },
-      },
-    },
-  },
-  {
-    name: 'take_camera_photo',
-    description: "Snaps a real photo using the Mac's FaceTime HD / webcam camera so the user can see what is in front of the laptop.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {},
-    },
-  },
-  {
-    name: 'mouse_click',
-    description: 'Clicks the mouse at specific screen coordinates (x, y). The main MacBook display resolution is 1440 x 900 points.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        x: { type: Type.NUMBER, description: 'Horizontal coordinate in points (0 to 1440)' },
-        y: { type: Type.NUMBER, description: 'Vertical coordinate in points (0 to 900)' },
-        button: { type: Type.STRING, enum: ['left', 'right'], description: 'Mouse button to click (default left)' },
-        doubleClick: { type: Type.BOOLEAN, description: 'Set true to double-click' },
-      },
-      required: ['x', 'y'],
-    },
-  },
-  {
-    name: 'mouse_move',
-    description: 'Moves the mouse cursor to specific coordinates (x, y) without clicking.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        x: { type: Type.NUMBER, description: 'Horizontal coordinate in points (0 to 1440)' },
-        y: { type: Type.NUMBER, description: 'Vertical coordinate in points (0 to 900)' },
-      },
-      required: ['x', 'y'],
-    },
-  },
-  {
-    name: 'mouse_drag',
-    description: 'Clicks and drags the mouse from (startX, startY) to (endX, endY).',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        startX: { type: Type.NUMBER, description: 'Start X coordinate in points' },
-        startY: { type: Type.NUMBER, description: 'Start Y coordinate in points' },
-        endX: { type: Type.NUMBER, description: 'End X coordinate in points' },
-        endY: { type: Type.NUMBER, description: 'End Y coordinate in points' },
-      },
-      required: ['startX', 'startY', 'endX', 'endY'],
-    },
-  },
-  {
-    name: 'type_text',
-    description: 'Types text into the currently active/focused window, app, or input field on the Mac.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        text: { type: Type.STRING, description: 'The text string to type' },
-      },
-      required: ['text'],
-    },
-  },
-  {
-    name: 'press_key',
-    description: 'Presses a special keyboard key like enter, return, tab, esc, space, delete, arrow-down, arrow-up, arrow-left, arrow-right.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        key: { type: Type.STRING, description: 'Key name (e.g. enter, esc, space, tab, delete, arrow-down)' },
-      },
-      required: ['key'],
-    },
-  },
-  {
-    name: 'hotkey',
-    description: 'Triggers a keyboard shortcut combination on macOS (e.g. "cmd+space" for Spotlight, "cmd+c" to copy, "cmd+v" to paste, "cmd+w" to close window/tab, "cmd+t" for new tab, "cmd+q" to quit).',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        combination: { type: Type.STRING, description: 'Shortcut combination like "cmd+space", "cmd+c", "cmd+v", "cmd+w"' },
-      },
-      required: ['combination'],
-    },
-  },
-  {
-    name: 'open_app',
-    description: 'Opens or switches to any macOS application by name (e.g. "Safari", "Notes", "Spotify", "Terminal", "Google Chrome", "Calculator", "System Settings").',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        appName: { type: Type.STRING, description: 'Name of the macOS application to open' },
-      },
-      required: ['appName'],
-    },
-  },
-  {
-    name: 'execute_command',
-    description: 'Runs a zsh shell command on the Mac. Use this to run git commands (git status, pull, diff, commit), test apps (npm test, pytest), check files, or control processes.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        command: {
-          type: Type.STRING,
-          description: 'The shell command to run (e.g. "git status", "npm test", "curl ...")',
-        },
-        cwd: {
-          type: Type.STRING,
-          description: 'Working directory to run the command in. Defaults to the user workspace or home.',
-        },
-      },
-      required: ['command'],
-    },
-  },
-  {
-    name: 'search_web',
-    description: 'Searches Google / the web for information, documentation, error solutions, or current news.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        query: {
-          type: Type.STRING,
-          description: 'Search query string',
-        },
-      },
-      required: ['query'],
-    },
-  },
-  {
-    name: 'send_telegram_message',
-    description: 'Sends a Telegram message (or real photo files) to a person, group, or to "me" (Saved Messages). When sending a screenshot or camera photo, provide the URL or path in mediaPath or mediaPaths to deliver it as an actual photo directly on Telegram!',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        recipient: {
-          type: Type.STRING,
-          description: 'Username (@username), phone number, or "me" for your personal Saved Messages',
-        },
-        message: {
-          type: Type.STRING,
-          description: 'The message text or photo caption',
-        },
-        mediaPath: {
-          type: Type.STRING,
-          description: 'Optional path or URL of an image/photo to send as an actual photo file (e.g. "/captures/shot-xxx.png" or "/captures/camera-xxx.jpg")',
-        },
-        mediaPaths: {
-          type: Type.ARRAY,
-          items: { type: Type.STRING },
-          description: 'Optional list of multiple image paths/URLs to send as actual photo files to Telegram',
-        },
-        isVoiceNote: {
-          type: Type.BOOLEAN,
-          description: 'Set true to synthesize and deliver this message as an authentic Telegram voice note audio recording instead of text',
-        },
-      },
-      required: ['recipient', 'message'],
-    },
-  },
-  {
-    name: 'speak_aloud',
-    description: 'Speaks text out loud through the Mac laptop built-in speakers using macOS speech synthesis.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        text: { type: Type.STRING, description: 'The text message to speak out loud' },
-        voice: { type: Type.STRING, description: 'Optional voice name (e.g. "Samantha", "Daniel", "Fred", "Victoria")' },
-      },
-      required: ['text'],
-    },
-  },
-  {
-    name: 'run_agy_task',
-    description:
-      'Delegates complex, heavy, deep-thinking, coding, refactoring, bug-fixing, multi-file editing, or system engineering tasks to Google Antigravity CLI (agy) running Gemini 3.8 Flash High with full autonomous capabilities and auto-approved permissions (--dangerously-skip-permissions). Use this whenever a task is hard, requires deep code understanding, multi-step problem solving, or modifying project files.',
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        prompt: {
-          type: Type.STRING,
-          description: 'The exact high-level instruction, bug description, or complex goal to delegate to Antigravity (agy).',
-        },
-        model: {
-          type: Type.STRING,
-          description: 'Optional model to use in agy (defaults to "gemini-3.8-flash-high", can also use "claude-sonnet-4-6" or "gemini-3.1-pro-high")',
-        },
-      },
-      required: ['prompt'],
-    },
-  },
-];
-
 export class PocketAgent {
   private apiKey: string;
   private modelTier: 'flash' | 'pro';
   private customAgyModel: string = 'gemini-3.8-flash-high';
   private cavemanMode: 'off' | 'lite' | 'full' | 'ultra' = 'off';
+  private toolRegistry: ToolRegistry;
   private metrics: SessionMetrics = {
     startTime: Date.now(),
     totalRequests: 0,
@@ -261,11 +61,17 @@ export class PocketAgent {
     telegramMessages: 0,
   };
 
-  constructor(apiKey?: string, modelTier: 'flash' | 'pro' = 'pro', activeModel?: string) {
+  constructor(apiKey?: string, modelTier: 'flash' | 'pro' = 'pro', activeModel?: string, toolRegistry?: ToolRegistry) {
     this.apiKey = apiKey || process.env.GEMINI_API_KEY || '';
     this.modelTier = (process.env.MODEL_TIER as any) === 'flash' ? 'flash' : (modelTier || 'pro');
     this.customAgyModel = activeModel || process.env.ACTIVE_MODEL || 'gemini-3.8-flash-high';
+    this.toolRegistry = toolRegistry || createDefaultToolRegistry();
   }
+
+  public getToolRegistry(): ToolRegistry {
+    return this.toolRegistry;
+  }
+
 
   public updateApiKey(key: string) {
     this.apiKey = key;
@@ -314,7 +120,8 @@ export class PocketAgent {
     assistantMessageId: string,
     callbacks: AgentCallbacks,
     agyConversationId?: string,
-    attachedImages?: string[]
+    attachedImages?: string[],
+    sessionId?: string
   ): Promise<string> {
     const trimmed = userText.trim();
 
@@ -1105,12 +912,17 @@ ${this.cavemanMode !== 'off' ? `\nCAVEMAN ${this.cavemanMode.toUpperCase()} MODE
         let lastErr: any = null;
         for (const m of candidateModels) {
           try {
+            const projectedContents = ContextCompactor.project(contents, {
+              workspaceDir: process.env.WORKSPACE_ROOT || process.cwd(),
+              systemInstruction,
+            });
+
             return await ai.models.generateContent({
               model: m,
-              contents,
+              contents: projectedContents,
               config: {
                 systemInstruction,
-                tools: [{ functionDeclarations: agentToolDeclarations as any }],
+                tools: [{ functionDeclarations: this.toolRegistry.getDeclarations() as any }],
               },
             });
           } catch (err: any) {
@@ -1178,163 +990,78 @@ ${this.cavemanMode !== 'off' ? `\nCAVEMAN ${this.cavemanMode.toUpperCase()} MODE
 
           callbacks.onUpdateMessage(assistantMessageId, {
             status: 'thinking',
-            content: `Running tool: **${call.name}**...`,
+            content:
+              call.name === 'run_agy_task'
+                ? `**Delegating to Antigravity (${call.args?.model || 'gemini-3.8-flash-high'})**...\n> "${call.args?.prompt || ''}"`
+                : `Running tool: **${call.name}**...`,
             toolCalls: [...toolRecords],
           });
+
+          const logId =
+            call.name === 'execute_command' || call.name === 'run_agy_task'
+              ? `term-${Date.now()}`
+              : undefined;
+
+          if (logId) {
+            const displayCmd =
+              call.name === 'execute_command'
+                ? String(call.args?.command || '')
+                : `agy --model ${call.args?.model || 'gemini-3.8-flash-high'} --dangerously-skip-permissions -p "${String(call.args?.prompt || '').replace(/"/g, '\\"')}"`;
+            callbacks.onTerminalLog({
+              id: logId,
+              command: displayCmd,
+              output: '',
+              status: 'running',
+              timestamp: Date.now(),
+            });
+          }
+
+          const ctx: ToolContext = {
+            sessionId: sessionId || 'default-session',
+            workspaceDir: process.env.WORKSPACE_ROOT || process.cwd(),
+            onStreamChunk: (chunk: string) => {
+              if (logId) {
+                callbacks.onTerminalChunk(logId, chunk);
+              }
+            },
+          };
 
           let functionResult: any;
 
           try {
-            if (call.name === 'take_screenshot') {
-              const shot = await takeMacScreenshot({
-                windowOnly: Boolean(call.args?.windowOnly),
-              });
-              latestScreenshotUrl = shot.publicUrl;
-              capturedMediaUrls.push(shot.publicUrl);
-              callbacks.onScreenshotReady(shot.publicUrl);
-              functionResult = {
-                status: 'success',
-                message: 'Screenshot captured successfully',
-                url: shot.publicUrl,
-                timestamp: shot.timestamp,
-              };
-            } else if (call.name === 'take_camera_photo') {
-              const photo = await takeCameraPhoto();
-              latestScreenshotUrl = photo.publicUrl;
-              capturedMediaUrls.push(photo.publicUrl);
-              callbacks.onScreenshotReady(photo.publicUrl);
-              functionResult = {
-                status: 'success',
-                message: 'Camera photo snapped successfully',
-                url: photo.publicUrl,
-                timestamp: photo.timestamp,
-              };
-            } else if (call.name === 'execute_command') {
-              const cmd = String(call.args?.command || '');
-              const cwd = call.args?.cwd ? String(call.args.cwd) : undefined;
-              const logId = `term-${Date.now()}`;
+            const effectiveArgs = { ...(call.args || {}) };
+            if (
+              call.name === 'send_telegram_message' &&
+              !effectiveArgs.mediaPaths &&
+              capturedMediaUrls.length > 0
+            ) {
+              effectiveArgs.mediaPaths = [...capturedMediaUrls];
+            }
 
-              callbacks.onTerminalLog({
-                id: logId,
-                command: cmd,
-                output: '',
-                status: 'running',
-                timestamp: Date.now(),
-              });
+            functionResult = await this.toolRegistry.execute(call.name, effectiveArgs, ctx);
 
-              const res = await executeShellCommand(cmd, {
-                cwd,
-                onChunk: (chunk) => callbacks.onTerminalChunk(logId, chunk),
-              });
+            if (logId) {
+              callbacks.onTerminalChunk(logId, '', functionResult?.exitCode ?? 0);
+            }
 
-              callbacks.onTerminalChunk(logId, '', res.exitCode);
-              functionResult = {
-                command: cmd,
-                exitCode: res.exitCode,
-                output: res.output,
-                durationMs: res.durationMs,
-              };
-            } else if (call.name === 'search_web') {
-              const query = String(call.args?.query || '');
-              const searchResults = await searchWeb(query);
-              functionResult = {
-                query,
-                results: searchResults,
-              };
-            } else if (call.name === 'mouse_click') {
-              const x = Number(call.args?.x || 0);
-              const y = Number(call.args?.y || 0);
-              const button = call.args?.button === 'right' ? 'right' : 'left';
-              const doubleClick = Boolean(call.args?.doubleClick);
-              const clickRes = await mouseClick({ x, y, button, doubleClick });
-              functionResult = clickRes;
-            } else if (call.name === 'mouse_move') {
-              const x = Number(call.args?.x || 0);
-              const y = Number(call.args?.y || 0);
-              const moveRes = await mouseMove(x, y);
-              functionResult = moveRes;
-            } else if (call.name === 'mouse_drag') {
-              const startX = Number(call.args?.startX || 0);
-              const startY = Number(call.args?.startY || 0);
-              const endX = Number(call.args?.endX || 0);
-              const endY = Number(call.args?.endY || 0);
-              const dragRes = await mouseDrag(startX, startY, endX, endY);
-              functionResult = dragRes;
-            } else if (call.name === 'type_text') {
-              const text = String(call.args?.text || '');
-              const typeRes = await typeText(text);
-              functionResult = typeRes;
-            } else if (call.name === 'press_key') {
-              const key = String(call.args?.key || '');
-              const keyRes = await pressKey(key);
-              functionResult = keyRes;
-            } else if (call.name === 'hotkey') {
-              const combination = String(call.args?.combination || '');
-              const hkRes = await hotkey(combination);
-              functionResult = hkRes;
-            } else if (call.name === 'open_app') {
-              const appName = String(call.args?.appName || '');
-              const openRes = await openApp(appName);
-              functionResult = openRes;
-            } else if (call.name === 'speak_aloud') {
-              const text = String(call.args?.text || '');
-              const voice = call.args?.voice ? String(call.args.voice) : undefined;
-              const speakRes = await speakAloud(text, voice);
-              functionResult = speakRes;
-            } else if (call.name === 'send_telegram_message') {
-              const recipient = String(call.args?.recipient || '');
-              const message = String(call.args?.message || '');
-              const mediaPath = call.args?.mediaPath ? String(call.args.mediaPath) : undefined;
-              const mediaPaths = Array.isArray(call.args?.mediaPaths)
-                ? call.args.mediaPaths.map(String)
-                : (capturedMediaUrls.length > 0 ? [...capturedMediaUrls] : undefined);
-              const isVoiceNote = Boolean(call.args?.isVoiceNote);
-
-              const tgRes = await sendTelegramMessage({ recipient, message, mediaPath, mediaPaths, isVoiceNote });
-              functionResult = tgRes;
-            } else if (call.name === 'run_agy_task') {
-              const prompt = String(call.args?.prompt || '');
-              const model = call.args?.model ? String(call.args.model) : 'gemini-3.8-flash-high';
-              const logId = `term-${Date.now()}`;
-
-              callbacks.onTerminalLog({
-                id: logId,
-                command: `agy --model ${model} --dangerously-skip-permissions -p "${prompt.replace(/"/g, '\\"')}"`,
-                output: '',
-                status: 'running',
-                timestamp: Date.now(),
-              });
-
-              callbacks.onUpdateMessage(assistantMessageId, {
-                status: 'thinking',
-                content: `**Delegating to Antigravity (${model})**...\n> "${prompt}"`,
-                toolCalls: [...toolRecords],
-              });
-
-              const agyRes = await runAgyTask({
-                prompt,
-                model,
-                conversationId: agyConversationId,
-                onConversationId: (id) => callbacks.onConversationId?.(id),
-                onChunk: (chunk) => callbacks.onTerminalChunk(logId, chunk),
-              });
-
-              callbacks.onTerminalChunk(logId, '', agyRes.exitCode);
-              functionResult = {
-                status: agyRes.exitCode === 0 ? 'success' : 'failed',
-                model: agyRes.model,
-                output: agyRes.output,
-                exitCode: agyRes.exitCode,
-                durationMs: agyRes.durationMs,
-              };
-            } else {
-              functionResult = { error: `Unknown tool: ${call.name}` };
+            const mediaUrl =
+              functionResult?.url || functionResult?.publicUrl || functionResult?.screenshotUrl;
+            if (
+              mediaUrl &&
+              (call.name === 'take_screenshot' || call.name === 'take_camera_photo')
+            ) {
+              latestScreenshotUrl = mediaUrl;
+              capturedMediaUrls.push(mediaUrl);
+              callbacks.onScreenshotReady(mediaUrl);
             }
 
             record.status = 'success';
             record.result = functionResult;
             record.completedAt = Date.now();
           } catch (toolError: any) {
+            if (logId) {
+              callbacks.onTerminalChunk(logId, '', 1);
+            }
             record.status = 'failed';
             record.error = toolError?.message || 'Tool execution failed';
             record.completedAt = Date.now();

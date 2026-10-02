@@ -1,3 +1,6 @@
+import { Type } from '@google/genai';
+import type { AgentTool } from './registry.js';
+
 export interface SearchResult {
   title: string;
   link: string;
@@ -90,3 +93,33 @@ export async function searchWeb(query: string, maxResults = 5): Promise<SearchRe
     ];
   }
 }
+
+export interface SearchWebResult {
+  query: string;
+  results: SearchResult[];
+}
+
+export const searchWebTool: AgentTool<{ query: string }, SearchWebResult> = {
+  name: 'search_web',
+  description: 'Searches Google / the web for information, documentation, error solutions, or current news.',
+  category: 'network',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      query: {
+        type: Type.STRING,
+        description: 'Search query string',
+      },
+    },
+    required: ['query'],
+  },
+  execute: async (args) => {
+    const query = String(args?.query || '');
+    const results = await searchWeb(query);
+    return {
+      query,
+      results,
+    };
+  },
+};
+

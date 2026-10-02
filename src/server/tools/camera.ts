@@ -1,6 +1,8 @@
 import { execa } from 'execa';
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import { Type } from '@google/genai';
+import type { AgentTool } from './registry.js';
 
 const CAPTURES_DIR = path.resolve(process.cwd(), 'captures');
 
@@ -9,6 +11,15 @@ export interface CameraPhotoResult {
   filePath: string;
   publicUrl: string;
   timestamp: number;
+}
+
+export interface TakeCameraPhotoResult {
+  status: 'success';
+  message: string;
+  url: string;
+  timestamp: number;
+  filePath?: string;
+  filename?: string;
 }
 
 /**
@@ -46,3 +57,25 @@ export async function takeCameraPhoto(options: { warmupSeconds?: number } = {}):
     throw error;
   }
 }
+
+export const takeCameraPhotoTool: AgentTool<{}, TakeCameraPhotoResult> = {
+  name: 'take_camera_photo',
+  description:
+    "Snaps a real photo using the Mac's FaceTime HD / webcam camera so the user can see what is in front of the laptop.",
+  category: 'system',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {},
+  },
+  execute: async (_args, _ctx) => {
+    const photo = await takeCameraPhoto();
+    return {
+      status: 'success',
+      message: 'Camera photo snapped successfully',
+      url: photo.publicUrl,
+      timestamp: photo.timestamp,
+      filePath: photo.filePath,
+      filename: photo.filename,
+    };
+  },
+};

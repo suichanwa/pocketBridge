@@ -9,6 +9,7 @@ import {
   Folder,
   File,
   FileCode,
+  FileText,
   Image,
   Package,
   Archive,
@@ -22,7 +23,11 @@ import {
   HardDrive,
   FolderOpen,
   Check,
+  Eye,
+  Music,
+  Film,
 } from 'lucide-react';
+import { FileViewerModal } from './FileViewerModal.js';
 
 interface FileManagerProps {
   isOpen: boolean;
@@ -39,6 +44,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ isOpen, onClose }) => 
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [previewFile, setPreviewFile] = useState<FileItem | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -154,12 +160,18 @@ export const FileManager: React.FC<FileManagerProps> = ({ isOpen, onClose }) => 
     if (item.isDirectory) return <Folder className="w-4 h-4 text-sky-400 shrink-0" />;
     const ext = item.extension;
     if (ext === 'apk') return <Package className="w-4 h-4 text-emerald-400 shrink-0" />;
-    if (['zip', 'tar', 'gz', 'bz2', 'xz', 'dmg'].includes(ext || ''))
+    if (['zip', 'tar', 'gz', 'bz2', 'xz', 'dmg', '7z', 'rar', 'iso'].includes(ext || ''))
       return <Archive className="w-4 h-4 text-amber-400 shrink-0" />;
-    if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext || ''))
+    if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'ico', 'bmp', 'avif'].includes(ext || ''))
       return <Image className="w-4 h-4 text-indigo-400 shrink-0" />;
-    if (['ts', 'tsx', 'js', 'jsx', 'json', 'py', 'sh', 'rs', 'go', 'html', 'css'].includes(ext || ''))
-      return <FileCode className="w-4 h-4 text-primary shrink-0" />;
+    if (['mp3', 'wav', 'ogg', 'oga', 'm4a', 'aac', 'flac', 'opus', 'aiff'].includes(ext || ''))
+      return <Music className="w-4 h-4 text-violet-400 shrink-0" />;
+    if (['mp4', 'webm', 'mov', 'mkv', 'avi', 'm4v', 'ogv'].includes(ext || ''))
+      return <Film className="w-4 h-4 text-rose-400 shrink-0" />;
+    if (ext === 'pdf')
+      return <FileText className="w-4 h-4 text-amber-400 shrink-0" />;
+    if (['ts', 'tsx', 'js', 'jsx', 'json', 'py', 'sh', 'rs', 'go', 'html', 'css', 'md', 'txt', 'log', 'yaml', 'yml'].includes(ext || ''))
+      return <FileCode className="w-4 h-4 text-sky-400 shrink-0" />;
     return <File className="w-4 h-4 text-muted-foreground shrink-0" />;
   };
 
@@ -294,7 +306,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ isOpen, onClose }) => 
                     if (item.isDirectory) {
                       fetchDirectory(item.path);
                     } else {
-                      handleDownload(item.path);
+                      setPreviewFile(item);
                     }
                   }}
                   className="group flex items-center justify-between p-2 rounded-lg cursor-pointer hover:bg-secondary/40 transition-colors border border-transparent hover:border-border/40"
@@ -318,18 +330,32 @@ export const FileManager: React.FC<FileManagerProps> = ({ isOpen, onClose }) => 
 
                     <div className="flex items-center gap-0.5">
                       {!item.isDirectory && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDownload(item.path);
-                          }}
-                          className="h-6 w-6 text-muted-foreground hover:text-primary hover:bg-primary/10"
-                          title="Download file to phone"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                        </Button>
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPreviewFile(item);
+                            }}
+                            className="h-6 w-6 text-muted-foreground hover:text-sky-400 hover:bg-sky-400/10"
+                            title="Preview file in app"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDownload(item.path);
+                            }}
+                            className="h-6 w-6 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                            title="Download file to phone"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </Button>
+                        </>
                       )}
                       <Button
                         variant="ghost"
@@ -351,6 +377,15 @@ export const FileManager: React.FC<FileManagerProps> = ({ isOpen, onClose }) => 
           )}
         </ScrollArea>
       </aside>
+
+      {/* In-app File & Media Previewer Modal */}
+      {previewFile && (
+        <FileViewerModal
+          file={previewFile}
+          onClose={() => setPreviewFile(null)}
+          onDownload={handleDownload}
+        />
+      )}
     </>
   );
 };

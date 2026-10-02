@@ -75,6 +75,18 @@ export interface FileItem {
   extension?: string;
 }
 
+export interface FileTextPreview {
+  name: string;
+  path: string;
+  size: number;
+  mtime: number;
+  extension?: string;
+  isBinary: boolean;
+  content: string;
+  truncated: boolean;
+  linesCount: number;
+}
+
 export interface ChatSessionMeta {
   id: string;
   title: string;

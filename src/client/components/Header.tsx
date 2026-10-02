@@ -159,7 +159,7 @@ export const Header: React.FC<HeaderProps> = ({
               className={`h-8 w-8 sm:h-9 sm:w-9 border-border/70 hover:bg-secondary/60 text-muted-foreground ${
                 isFilesOpen ? 'text-primary border-primary/40 bg-primary/10' : ''
               }`}
-              title="Files & APKs Downloader"
+              title="Files & APKs"
             >
               <HardDrive className="w-4 h-4" />
             </Button>

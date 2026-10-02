@@ -1,4 +1,6 @@
 import { execa } from 'execa';
+import { Type } from '@google/genai';
+import type { AgentTool } from './registry.js';
 
 export interface DisplayDimensions {
   width: number;
@@ -232,3 +234,160 @@ export async function openApp(appName: string): Promise<{ appName: string; succe
     throw new Error(`Failed to open application "${appName}": ${err?.message || 'Application not found'}`);
   }
 }
+
+export const mouseClickTool: AgentTool<
+  { x: number; y: number; button?: 'left' | 'right'; doubleClick?: boolean },
+  { x: number; y: number; button: string }
+> = {
+  name: 'mouse_click',
+  description:
+    'Clicks the mouse at specific screen coordinates (x, y). The main MacBook display resolution is 1440 x 900 points.',
+  category: 'gui',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      x: { type: Type.NUMBER, description: 'Horizontal coordinate in points (0 to 1440)' },
+      y: { type: Type.NUMBER, description: 'Vertical coordinate in points (0 to 900)' },
+      button: { type: Type.STRING, enum: ['left', 'right'], description: 'Mouse button to click (default left)' },
+      doubleClick: { type: Type.BOOLEAN, description: 'Set true to double-click' },
+    },
+    required: ['x', 'y'],
+  },
+  execute: async (args) => {
+    const x = Number(args?.x || 0);
+    const y = Number(args?.y || 0);
+    const button = args?.button === 'right' ? 'right' : 'left';
+    const doubleClick = Boolean(args?.doubleClick);
+    return await mouseClick({ x, y, button, doubleClick });
+  },
+};
+
+export const mouseMoveTool: AgentTool<{ x: number; y: number }, { x: number; y: number }> = {
+  name: 'mouse_move',
+  description: 'Moves the mouse cursor to specific coordinates (x, y) without clicking.',
+  category: 'gui',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      x: { type: Type.NUMBER, description: 'Horizontal coordinate in points (0 to 1440)' },
+      y: { type: Type.NUMBER, description: 'Vertical coordinate in points (0 to 900)' },
+    },
+    required: ['x', 'y'],
+  },
+  execute: async (args) => {
+    const x = Number(args?.x || 0);
+    const y = Number(args?.y || 0);
+    return await mouseMove(x, y);
+  },
+};
+
+export const mouseDragTool: AgentTool<
+  { startX: number; startY: number; endX: number; endY: number },
+  { startX: number; startY: number; endX: number; endY: number }
+> = {
+  name: 'mouse_drag',
+  description: 'Clicks and drags the mouse from (startX, startY) to (endX, endY).',
+  category: 'gui',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      startX: { type: Type.NUMBER, description: 'Start X coordinate in points' },
+      startY: { type: Type.NUMBER, description: 'Start Y coordinate in points' },
+      endX: { type: Type.NUMBER, description: 'End X coordinate in points' },
+      endY: { type: Type.NUMBER, description: 'End Y coordinate in points' },
+    },
+    required: ['startX', 'startY', 'endX', 'endY'],
+  },
+  execute: async (args) => {
+    const startX = Number(args?.startX || 0);
+    const startY = Number(args?.startY || 0);
+    const endX = Number(args?.endX || 0);
+    const endY = Number(args?.endY || 0);
+    return await mouseDrag(startX, startY, endX, endY);
+  },
+};
+
+export const typeTextTool: AgentTool<{ text: string }, { text: string }> = {
+  name: 'type_text',
+  description: 'Types text into the currently active/focused window, app, or input field on the Mac.',
+  category: 'gui',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      text: { type: Type.STRING, description: 'The text string to type' },
+    },
+    required: ['text'],
+  },
+  execute: async (args) => {
+    const text = String(args?.text || '');
+    return await typeText(text);
+  },
+};
+
+export const pressKeyTool: AgentTool<{ key: string }, { key: string }> = {
+  name: 'press_key',
+  description:
+    'Presses a special keyboard key like enter, return, tab, esc, space, delete, arrow-down, arrow-up, arrow-left, arrow-right.',
+  category: 'gui',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      key: { type: Type.STRING, description: 'Key name (e.g. enter, esc, space, tab, delete, arrow-down)' },
+    },
+    required: ['key'],
+  },
+  execute: async (args) => {
+    const key = String(args?.key || '');
+    return await pressKey(key);
+  },
+};
+
+export const hotkeyTool: AgentTool<{ combination: string }, { combination: string }> = {
+  name: 'hotkey',
+  description:
+    'Triggers a keyboard shortcut combination on macOS (e.g. "cmd+space" for Spotlight, "cmd+c" to copy, "cmd+v" to paste, "cmd+w" to close window/tab, "cmd+t" for new tab, "cmd+q" to quit).',
+  category: 'gui',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      combination: {
+        type: Type.STRING,
+        description: 'Shortcut combination like "cmd+space", "cmd+c", "cmd+v", "cmd+w"',
+      },
+    },
+    required: ['combination'],
+  },
+  execute: async (args) => {
+    const combination = String(args?.combination || '');
+    return await hotkey(combination);
+  },
+};
+
+export const openAppTool: AgentTool<{ appName: string }, { appName: string; success: boolean }> = {
+  name: 'open_app',
+  description:
+    'Opens or switches to any macOS application by name (e.g. "Safari", "Notes", "Spotify", "Terminal", "Google Chrome", "Calculator", "System Settings").',
+  category: 'gui',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      appName: { type: Type.STRING, description: 'Name of the macOS application to open' },
+    },
+    required: ['appName'],
+  },
+  execute: async (args) => {
+    const appName = String(args?.appName || '');
+    return await openApp(appName);
+  },
+};
+
+export const cursorTools: AgentTool[] = [
+  mouseClickTool,
+  mouseMoveTool,
+  mouseDragTool,
+  typeTextTool,
+  pressKeyTool,
+  hotkeyTool,
+  openAppTool,
+];
+

@@ -4,6 +4,9 @@ import path from 'node:path';
 import fs from 'node:fs';
 
 import { synthesizeVoiceNote } from './speech.js';
+import { Type } from '@google/genai';
+import type { AgentTool } from './registry.js';
+
 
 let clientInstance: TelegramClient | null = null;
 
@@ -225,3 +228,62 @@ export async function sendTelegramMessage(params: SendTelegramParams): Promise<{
       'Telegram is not connected yet. Run `npm run telegram:login` on your Mac terminal to link your personal Telegram account, or enter TELEGRAM_BOT_TOKEN in .env.',
   };
 }
+
+export const sendTelegramTool: AgentTool<
+  {
+    recipient: string;
+    message: string;
+    mediaPath?: string;
+    mediaPaths?: string[];
+    isVoiceNote?: boolean;
+  },
+  {
+    success: boolean;
+    recipient: string;
+    messageId?: number;
+    error?: string;
+  }
+> = {
+  name: 'send_telegram_message',
+  description:
+    'Sends a Telegram message (or real photo files) to a person, group, or to "me" (Saved Messages). When sending a screenshot or camera photo, provide the URL or path in mediaPath or mediaPaths to deliver it as an actual photo directly on Telegram!',
+  category: 'network',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      recipient: {
+        type: Type.STRING,
+        description: 'Username (@username), phone number, or "me" for your personal Saved Messages',
+      },
+      message: {
+        type: Type.STRING,
+        description: 'The message text or photo caption',
+      },
+      mediaPath: {
+        type: Type.STRING,
+        description:
+          'Optional path or URL of an image/photo to send as an actual photo file (e.g. "/captures/shot-xxx.png" or "/captures/camera-xxx.jpg")',
+      },
+      mediaPaths: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+        description: 'Optional list of multiple image paths/URLs to send as actual photo files to Telegram',
+      },
+      isVoiceNote: {
+        type: Type.BOOLEAN,
+        description:
+          'Set true to synthesize and deliver this message as an authentic Telegram voice note audio recording instead of text',
+      },
+    },
+    required: ['recipient', 'message'],
+  },
+  execute: async (args) => {
+    const recipient = String(args?.recipient || '');
+    const message = String(args?.message || '');
+    const mediaPath = args?.mediaPath ? String(args.mediaPath) : undefined;
+    const mediaPaths = Array.isArray(args?.mediaPaths) ? args.mediaPaths.map(String) : undefined;
+    const isVoiceNote = Boolean(args?.isVoiceNote);
+    return await sendTelegramMessage({ recipient, message, mediaPath, mediaPaths, isVoiceNote });
+  },
+};
+

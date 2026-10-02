@@ -1,6 +1,8 @@
 import { execa } from 'execa';
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import { Type } from '@google/genai';
+import type { AgentTool } from './registry.js';
 
 const CAPTURES_DIR = path.resolve(process.cwd(), 'captures');
 
@@ -11,6 +13,15 @@ export interface ScreenshotResult {
   timestamp: number;
   width?: number;
   height?: number;
+}
+
+export interface TakeScreenshotResult {
+  status: 'success';
+  message: string;
+  url: string;
+  timestamp: number;
+  filePath?: string;
+  filename?: string;
 }
 
 export async function ensureCapturesDir(): Promise<void> {
@@ -64,3 +75,32 @@ export async function takeMacScreenshot(options: {
     throw error;
   }
 }
+
+export const takeScreenshotTool: AgentTool<{ windowOnly?: boolean }, TakeScreenshotResult> = {
+  name: 'take_screenshot',
+  description:
+    'Takes a real-time screenshot of the Mac screen/running apps and returns the image URL so the user can view it on their phone.',
+  category: 'gui',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      windowOnly: {
+        type: Type.BOOLEAN,
+        description: 'If true, captures the active frontmost window instead of the entire screen.',
+      },
+    },
+  },
+  execute: async (args, _ctx) => {
+    const shot = await takeMacScreenshot({
+      windowOnly: Boolean(args?.windowOnly),
+    });
+    return {
+      status: 'success',
+      message: 'Screenshot captured successfully',
+      url: shot.publicUrl,
+      timestamp: shot.timestamp,
+      filePath: shot.filePath,
+      filename: shot.filename,
+    };
+  },
+};

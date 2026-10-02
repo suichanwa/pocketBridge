@@ -1,5 +1,7 @@
 import { execa } from 'execa';
 import os from 'node:os';
+import { Type } from '@google/genai';
+import type { AgentTool } from './registry.js';
 
 export interface ShellExecOptions {
   cwd?: string;
@@ -73,3 +75,32 @@ export async function executeShellCommand(
     };
   }
 }
+
+export const executeCommandTool: AgentTool<{ command: string; cwd?: string }, ShellExecResult> = {
+  name: 'execute_command',
+  description:
+    'Runs a zsh shell command on the Mac. Use this to run git commands (git status, pull, diff, commit), test apps (npm test, pytest), check files, or control processes.',
+  category: 'shell',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      command: {
+        type: Type.STRING,
+        description: 'The shell command to run (e.g. "git status", "npm test", "curl ...")',
+      },
+      cwd: {
+        type: Type.STRING,
+        description: 'Working directory to run the command in. Defaults to the user workspace or home.',
+      },
+    },
+    required: ['command'],
+  },
+  execute: async (args, ctx) => {
+    const cmd = String(args?.command || '');
+    const cwd = args?.cwd ? String(args.cwd) : ctx.workspaceDir;
+    return await executeShellCommand(cmd, {
+      cwd,
+      onChunk: ctx.onStreamChunk,
+    });
+  },
+};

@@ -1,4 +1,7 @@
 import { spawn } from 'node:child_process';
+import { Type } from '@google/genai';
+import type { AgentTool } from './registry.js';
+
 
 export interface AgyTaskOptions {
   prompt: string;
@@ -229,3 +232,52 @@ export async function runAgyTask(options: AgyTaskOptions): Promise<AgyTaskResult
     });
   });
 }
+
+export interface RunAgyResult {
+  status: 'success' | 'failed';
+  model: string;
+  output: string;
+  exitCode: number;
+  durationMs: number;
+}
+
+export const runAgyTaskTool: AgentTool<{ prompt: string; model?: string }, RunAgyResult> = {
+  name: 'run_agy_task',
+  description:
+    'Delegates complex, heavy, deep-thinking, coding, refactoring, bug-fixing, multi-file editing, or system engineering tasks to Google Antigravity CLI (agy) running Gemini 3.8 Flash High with full autonomous capabilities and auto-approved permissions (--dangerously-skip-permissions). Use this whenever a task is hard, requires deep code understanding, multi-step problem solving, or modifying project files.',
+  category: 'delegation',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      prompt: {
+        type: Type.STRING,
+        description:
+          'The exact high-level instruction, bug description, or complex goal to delegate to Antigravity (agy).',
+      },
+      model: {
+        type: Type.STRING,
+        description:
+          'Optional model to use in agy (defaults to "gemini-3.8-flash-high", can also use "claude-sonnet-4-6" or "gemini-3.1-pro-high")',
+      },
+    },
+    required: ['prompt'],
+  },
+  execute: async (args, ctx) => {
+    const prompt = String(args?.prompt || '');
+    const model = args?.model ? String(args.model) : 'gemini-3.8-flash-high';
+    const agyRes = await runAgyTask({
+      prompt,
+      model,
+      cwd: ctx.workspaceDir,
+      onChunk: ctx.onStreamChunk,
+    });
+    return {
+      status: agyRes.exitCode === 0 ? 'success' : 'failed',
+      model: agyRes.model,
+      output: agyRes.output,
+      exitCode: agyRes.exitCode,
+      durationMs: agyRes.durationMs,
+    };
+  },
+};
+
